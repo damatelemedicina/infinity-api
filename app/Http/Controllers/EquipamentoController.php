@@ -20,7 +20,36 @@ class EquipamentoController extends Controller
 
     public function getEquipamentos(Request $request) {
         $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
-        $equipamentos = Equipamento::where('empresa_id', $empresa->id)->get();
+        $body = $request->input('body');
+
+        $where = ['empresa_id' => $empresa->id];
+
+        if (empty($body['cliente_id']) === false) {
+            $where['cliente_id'] = $body['cliente_id'];
+        }
+
+        if (empty($body['exame']) === false) {
+            $where['exame'] = $body['exame'];
+        }
+
+        if (empty($body['marca']) === false) {
+            $where['marca'] = $body['marca'];
+        }
+
+        if (empty($body['em_estoque']) === false) {
+            $where['em_estoque'] = $body['em_estoque'];
+        }
+
+        if (empty($body['patrimonio']) === false) {
+            $where['patrimonio'] = $body['patrimonio'];
+        }
+
+        if (empty($body['serie']) === false) {
+            $where['serie'] = $body['serie'];
+        }
+
+        $equipamentos = Equipamento::where($where)->get();
+
         foreach ($equipamentos as $equipamento) {
             $cliente = Cliente::Where('id', $equipamento->cliente_id)->first();
             $equipamento->clienteNome = $cliente ? $cliente->nome : "NAO DEFINIDO";

@@ -102,8 +102,11 @@ class DbManagerBase implements DbManager
     private function isChildOf($table, $target) 
     {
         $target = substr($target, 0, -1);
-        foreach ($this->columns($table) as $key => $column)
-            if ($column['name'] == $target . '_id') return true;
+        $columns = $this->columns($table);
+        if($columns) {
+            foreach ($this->columns($table) as $key => $column)
+                if ($column['name'] == $target . '_id') return true;
+        }
         return false;
     }
 

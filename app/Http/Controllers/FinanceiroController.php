@@ -100,7 +100,6 @@ class FinanceiroController extends Controller
     }
 
     public function getPrecoCliente(Request $request) {
-        $this->validarRequisicao($request, Self::$BODY_REQUIRED);
         $model = PrecoCliente::where('id', $request['body']['id'])->first();
         if (!$model) throw new FinanceiroException("Regra não encontrada!");
         return $model;
@@ -109,6 +108,12 @@ class FinanceiroController extends Controller
     public function getPrecoClientes(Request $request) {
         $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
         return PrecoCliente::where('empresa_id', $empresa->id)->get();
+    }
+
+    public function serverProcessingPrecoCliente(Request $request) {
+        $this->validarRequisicao($request, Self::$BODY_REQUIRED);
+        $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
+        return PrecoCliente::serverProcessing($empresa->id);
     }
 
     // ------------- MEDICOS
@@ -163,4 +168,9 @@ class FinanceiroController extends Controller
         return PrecoMedico::where('empresa_id', $empresa->id)->get();
     }
 
+    public function serverProcessingPrecoMedico(Request $request) {
+        $this->validarRequisicao($request, Self::$BODY_REQUIRED);
+        $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
+        return PrecoMedico::serverProcessing($empresa->id);
+    }
 }

@@ -20,7 +20,8 @@ use App\Models\Servico;
 
 class EmpresaController extends Controller
 {
-    public function getEmpresas(Request $request) {
+    public function getEmpresas(Request $request)
+    {
 
         $this->validarRequisicao($request);
 
@@ -50,13 +51,10 @@ class EmpresaController extends Controller
                     'EmpresaMedicoCompartilhado' => $e['medico_compartilhado'],
                     'EmpresaServicos' => $servicos
                 ];
-
             }
-
         }
 
         return response()->json($result);
-
     }
 
     public function setEmpresa(Request $request)
@@ -69,6 +67,26 @@ class EmpresaController extends Controller
         if (!isset($data['EmpresaLogin']) || !isset($data['EmpresaNome']))
             throw new CamposObrigatoriosException();
 
+        $acessowebservicesoc = isset($data['acessowebservicesoc']) && $data['acessowebservicesoc'] == true;
+        if ($acessowebservicesoc) {
+            validator($data, [
+                "soc_usuario_webservice" => 'required',
+                "soc_password_webservice" => 'required',
+                "soc_codigo_usuario" => 'required',
+                "soc_chave_acesso" => 'required',
+                "soc_codigo_empresa_principal" => 'required',
+                "soc_codigo_responsavel" => 'required',
+            ], [], [
+                "soc_usuario_webservice" => '<b>Usuário WebService SOC</b>',
+                "soc_password_webservice" => '<b>Senha Usuário WebService SOC</b>',
+                "soc_codigo_usuario" => '<b>Código Usuário SOC</b>',
+                "soc_chave_acesso" => '<b>Chave de acesso SOC</b>',
+                "soc_codigo_empresa_principal" => '<b>Código Empresa Principal</b>',
+                "soc_codigo_responsavel" => '<b>Código Responsavel</b>',
+            ])
+                ->validate();
+        }
+
         $empresa = Empresa::where('login', $data['EmpresaLogin'])->first();
         if ($empresa) {
 
@@ -79,35 +97,41 @@ class EmpresaController extends Controller
 
                 // Bloqueio do próprio domínio
                 if ($this->getEmpresaDoDominio($request) == $data['EmpresaLogin'])
-                   throw new BloqueioNaoPermitidoException();
+                    throw new BloqueioNaoPermitidoException();
 
                 // Tentativa de bloqueio da matriz desse domínio
                 $empresaAtual = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
                 if ($empresaAtual->matriz == $empresa->id) throw new BloqueioNaoPermitidoException();
-
             }
-
         } else {
 
             $empresa = new Empresa();
             $empresa->matriz = $this->getMatriz($request);
-
         }
 
         $empresa->login = $data['EmpresaLogin'];
         $empresa->nome = $data['EmpresaNome'];
         $empresa->situacao = (isset($data['EmpresaBloquear']) && $data['EmpresaBloquear'])
-                             ? Empresa::$BLOQUEADA : Empresa::$ATIVA;
+            ? Empresa::$BLOQUEADA : Empresa::$ATIVA;
 
         $empresa->medico_compartilhado = (
             isset($data['EmpresaMedicoCompartilhado']) && $data['EmpresaMedicoCompartilhado']
         ) ? 1 : 0;
 
+        if ($acessowebservicesoc) {
+            $empresa->soc_usuario_webservice = $data['soc_usuario_webservice'];
+            $empresa->soc_password_webservice = $data['soc_password_webservice'];
+            $empresa->soc_codigo_usuario = $data['soc_codigo_usuario'];
+            $empresa->soc_chave_acesso = $data['soc_chave_acesso'];
+            $empresa->soc_codigo_empresa_principal = $data['soc_codigo_empresa_principal'];
+            $empresa->soc_codigo_responsavel = $data['soc_codigo_responsavel'];
+        }
+
         $empresa->save();
 
         Servico::where('filial_id', '=', $empresa->id)->delete();
 
-        foreach($data['EmpresaServicos'] as $value){
+        foreach ($data['EmpresaServicos'] as $value) {
             if (!$value) continue;
             $servico = new Servico();
             $servico->empresa_id = $empresa->matriz;
@@ -124,10 +148,10 @@ class EmpresaController extends Controller
             'EmpresaSituacao' => $empresa->situacao,
             'EmpresaServicos' => $data['EmpresaServicos']
         );
-
     }
 
-    public function delEmpresa(Request $request) {
+    public function delEmpresa(Request $request)
+    {
         $this->validarRequisicao($request, Self::$BODY_REQUIRED);
         if (!isset($request['body']['login'])) throw new RequisicaoMalFormadaException();
         $login = strtoupper($request['body']['login']);
@@ -139,17 +163,18 @@ class EmpresaController extends Controller
         return $this->getEmpresas($request);
     }
 
-    public function getEmpresa(Request $request) {
+    public function getEmpresa(Request $request)
+    {
         $this->validarRequisicao($request, Self::$BODY_REQUIRED);
         if (!isset($request['body']['login'])) throw new RequisicaoMalFormadaException();
         $login = strtoupper($request['body']['login']);
         $empresa = Empresa::where('login', $login)->first();
         if (!$empresa) throw new EmpresaNaoEncontradaException();
         $servicos = Servico::where('filial_id', $empresa['id'])
-        ->select('tipo_exame_id AS TipoExameId')
-        ->get();
+            ->select('tipo_exame_id AS TipoExameId')
+            ->get();
 
-/*
+        /*
         $servicos = array(
             array(
                 'TipoExameId' => '1',
@@ -157,6 +182,7 @@ class EmpresaController extends Controller
             ),
         );
 */
+
         return [
             'EmpresaId' => $empresa['id'],
             'EmpresaLogin' => $empresa['login'],
@@ -164,8 +190,14 @@ class EmpresaController extends Controller
             'EmpresaMatriz' => $empresa['matriz'],
             'EmpresaSituacao' => $empresa['situacao'],
             'EmpresaMedicoCompartilhado' => $empresa['medico_compartilhado'],
-            'EmpresaServicos' => $servicos
+            'EmpresaServicos' => $servicos,
+            'acessowebservicesoc' => empty($empresa['soc_codigo_empresa_principal']) == false ? 1 : 0,
+            'soc_usuario_webservice' => $empresa['soc_usuario_webservice'],
+            'soc_password_webservice' => $empresa['soc_password_webservice'],
+            'soc_codigo_usuario' => $empresa['soc_codigo_usuario'],
+            'soc_chave_acesso' => $empresa['soc_chave_acesso'],
+            'soc_codigo_empresa_principal' => $empresa['soc_codigo_empresa_principal'],
+            'soc_codigo_responsavel' => $empresa['soc_codigo_responsavel'],
         ];
     }
-
 }

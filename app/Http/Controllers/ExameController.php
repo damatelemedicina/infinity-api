@@ -19,7 +19,7 @@ use App\Exceptions\TipoExameNaoEncontradoException;
 use App\Exceptions\InclusaoDeLaudoException;
 use App\Exceptions\ExameNaoPodeSerPausadoException;
 use App\Exceptions\RecusaNaoPermitidaException;
-use App\Exceptions\LaudoException;
+use App\Exceptions\ExameException;
 
 use App\Models\Empresa;
 use App\Models\Ficha;
@@ -45,11 +45,11 @@ use Smalot\PdfParser\Parser;
 
 use App\Builders\WinspiroProBuilder;
 use App\Builders\CardioBrasilBuilder;
-
+use App\Exceptions\UsuarioNaoAdminException;
 use Illuminate\Support\Facades\Log;
 
 use App\ViewModels\ExameViewModel;
-
+use App\ViewModels\LoginViewModel;
 use Carbon\Carbon;
 
 // https://blog.filestack.com/tutorials/step-step-guide-laravel-file-upload/
@@ -70,9 +70,10 @@ class ExameController extends Controller
     private static $NAO_INFORMADO = 0;
 
     private static $TIPO_ENVIO = 'MANUAL';
+    private static $ORTHANC = 'ORTHANC';
+    private static $ATENDIMENTO_PADRAO = 'OCUPACIONAL';
 
     private static $MARCADO = 1;
-    private static $ATENDIMENTO_PADRAO = 'OCUPACIONAL';
     private static $LAUDO_NORMAL = 0;
     private static $LAUDO_RAPIDO = 1;
     private static $LAUDO_EMERGENCIA = 2;
@@ -95,6 +96,8 @@ class ExameController extends Controller
     private static $MOTIVO_DO_EXAME_NAO_INFORMADO = 'Motivo do exame não informados!';
     private static $EXAME_DESPACHADO_PARA_OUTRO_MEDICO = 'Exame despachado para outro médico!';
     private static $USUARIO_NAO_VINCULADO_A_MEDICO = 'Usuário não vinculado a um médico!';
+    private static $COMPLEMENTO_LAUDO_OBRIGATORIO = 'Complemento do laudo é obrigatório!';
+    private static $EXAME_ATRIBUIDO_A_OUTRO_MEDICO = 'Exame atribuido a outro médico!';
 
     private static $DEFAULT_LAUDO_VIEW = 'laudo';
     private static $OIT_LAUDO_VIEW = 'laudo-oit';
@@ -105,46 +108,116 @@ class ExameController extends Controller
     private static $USUARIO_LOGADO = null;
 
     function __construct() {
-        // $exame = (Object)array(
-        //     'exame_id' => 8,
-        //     'arquivo_laudo' => '/uploads/laudos/3muBcPCo9p7agKQu4Spwx4iwSpraOhJBvT0afvpk.pdf',
-        //     'laudo_anexo' => '/uploads/laudos/Hlg3zLDr56Ha5R2qwXLW4uDfm4ftLHvnTpDc5xN0.pdf',
-        //     'cpf' => '11776329856',
-        //     'id' => 1969,
-        //     'paciente' => 'Carlos L. Santos',
+
+        // $clienteId = $this->getClinicaByInstitutionName(array('cliente' => 'CRJ - Centro Radiologico Jundiaí'));
+        // if ($clienteId == 7) \Log::Debug(">>>>>>> INSTITUTION NAME PASSOU!");
+        // else \Log::Debug(">>>>>>> " . $institutionName);
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => Self::$EXAME_LAUDADO,
+        //         'medico_id' => 10,
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     ),
+        //     (object)array()
         // );
-        // $exame->arquivo_laudo = $this->compoeLaudoComAnexo($exame);
-        // \Log::Debug('>>>> arquivo_laudo:' . $exame->arquivo_laudo);
-        // $arquivo_laudo = Utils::getNomeLaudoParaDownload($exame);
-        // \Log::Debug('>>>> para download:' . $arquivo_laudo);
-        // \Log::Debug(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        // Self::SHORTPNG("/uploads/exames/zt2xojpkwfx7ytksh64osk4vymx8qkmp5sphpdiu.png");
-        // \Log::Debug(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
+        // if ($exame->medico_id == 10) \Log::Debug("1) PASSOU PARA EXAME LAUDADO!");
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => 0,
+        //         'medico_id' => 0,
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     ), (object)array()
+        // );
+        // if ($exame->medico_id == 0) \Log::Debug("2) PASSOU PARA MEDICO NÃO ATRIBUIDO!");
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => 0,
+        //         'medico_id' => 10,
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     ),
+        //     (object)array(
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     )
+        // );
+        // if ($exame->medico_id == 10) \Log::Debug("3) PASSOU PARA ANTERIOR LAUDO RAPIDO!");
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => 0,
+        //         'medico_id' => 10,
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     ),
+        //     (object)array(
+        //         'emergencia' => Self::$LAUDO_EMERGENCIA
+        //     )
+        // );
+        // if ($exame->medico_id == 10) \Log::Debug("4) PASSOU PARA ANTERIOR LAUDO EMERGENCIA!");
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => 0,
+        //         'medico_id' => 10,
+        //         'emergencia' => Self::$LAUDO_EMERGENCIA
+        //     ),
+        //     (object)array(
+        //         'emergencia' => Self::$LAUDO_NORMAL
+        //     )
+        // );
+        // if ($exame->medico_id == 10) \Log::Debug("5) PASSOU PARA ATUAL LAUDO EMERGENCIA!");
+
+        // $exame = $this->validaLaudoRapidoComMedico(
+        //     (object)array(
+        //         'status' => 0,
+        //         'medico_id' => 10,
+        //         'emergencia' => Self::$LAUDO_RAPIDO
+        //     ),
+        //     (object)array(
+        //         'emergencia' => Self::$LAUDO_NORMAL
+        //     )
+        // );
+        // if ($exame->medico_id == 0) \Log::Debug("6) PASSOU PARA ANTERIOR NORMAL E ATUAL RAPIDO!");
+
+    }
+
+    private function validaLaudoRapidoComMedico($exame, $anterior) {
+        if ($exame->status == Self::$EXAME_LAUDADO) return $exame;
+        if ($exame->medico_id == 0) return $exame;
+        if ($anterior->emergencia == Self::$LAUDO_NORMAL && $exame->emergencia == Self::$LAUDO_RAPIDO) {
+            $exame->medico_id = 0;
+        }
+        return $exame;
     }
 
     function retirada(Request $request) {
-        $exame = Exame::where('protocolo', $request->id)->first();
-        if (!$exame) {
-            return response()
-                ->json(['erro' => 'Protocolo não encontrado!'])
-                ->setStatusCode(200);
+        try {
+            $exame = Exame::where('protocolo', $request->id)->first();
+            if (!$exame) {
+                return response()
+                    ->json(['erro' => 'Protocolo não encontrado!'])
+                    ->setStatusCode(200);
+            }
+            if ($exame->status == Exame::$CANCELADO) {
+                return response()
+                    ->json(['erro' => 'Laudo cancelado pelo médico!'])
+                    ->setStatusCode(200);
+            }
+            $path = storage_path($exame->arquivo_laudo);
+            if (!$exame->arquivo_laudo || !\File::exists($path)) {
+                return response()
+                    ->json(['erro' => 'Laudo não encontrado!'])
+                    ->setStatusCode(200);
+            }
+            if ($request->download) {
+                return response()->download($path);
+            }
+            $domain = env('DOMAIN') ? env('DOMAIN') : \URL::to('/');
+            return $domain . '/retirada?id=' . $request->id . '&download=true';
+        } catch (\Throwable $th) {
+            abort(404);
         }
-        if ($exame->status == Exame::$CANCELADO) {
-            return response()
-                ->json(['erro' => 'Laudo cancelado pelo médico!'])
-                ->setStatusCode(200);
-        }
-        $path = storage_path($exame->arquivo_laudo);
-        if (!\File::exists($path)) {
-            return response()
-                ->json(['erro' => 'Laudo não encontrado!'])
-                ->setStatusCode(200);
-        }
-        if ($request->download) {
-            return response()->download($path);
-        }
-        $domain = env('DOMAIN') ? env('DOMAIN') : \URL::to('/');
-        return $domain . '/retirada?id=' . $request->id . '&download=true';
     }
 
     function getCampos(Request $request) {
@@ -177,14 +250,18 @@ class ExameController extends Controller
         $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
         $usuario = Usuario::where('login', $request['session']['login'])->first();
         $ativos = isset($request['body']) && isset($request['body']['inativos']) ? 0 : 1;
+        $data_inicio_pesquisa = isset($request['body']) && isset($request['body']['data_inicio_pesquisa'])
+        ? date_create_from_format('d/m/Y', $request['body']['data_inicio_pesquisa'])->format('Y-m-d 00:00:00')
+         : null;
         if ($usuario == null) throw new UsuarioNaoEncontradoException();
         if ($usuario->conta_cliente > 0) {
-            return ExameViewModel::getExamesDoCliente($usuario->conta_cliente, $ativos);
+            $usuarioId = $usuario->restringir_exames == 1 ? $usuario->id : 0;
+            return ExameViewModel::getExamesDoCliente($usuario->conta_cliente, $ativos, $usuarioId, $data_inicio_pesquisa);
         }
         if ($usuario->conta_medico > 0) {
-            return ExameViewModel::getExamesDoMedico($usuario->conta_medico, $ativos);
+            return ExameViewModel::getExamesDoMedico($usuario->conta_medico, $ativos, $data_inicio_pesquisa);
         }
-        return ExameViewModel::getExamesDaEmpresa($empresa->id, $ativos);
+        return ExameViewModel::getExamesDaEmpresa($empresa->id, $ativos, $data_inicio_pesquisa);
     }
 
     function getExameParaLaudar(Request $request) {
@@ -196,6 +273,12 @@ class ExameController extends Controller
         if (count($exame) == 0) throw new ExameNaoEncontradoException();
         $exame = $exame[0];
         if ($exame['laudar_medico_id'] != $medicoId) throw new InclusaoDeLaudoException(Self::$EXAME_DESPACHADO_PARA_OUTRO_MEDICO);
+
+        $exameSoc = Exame::select("soc_seq_resultado", "soc_seq_ficha", "soc_codigo_exame")->where("id", $id)->first();
+        $exame['soc_seq_resultado'] = $exameSoc['soc_seq_resultado'];
+        $exame['soc_seq_ficha'] = $exameSoc['soc_seq_ficha'];
+        $exame['soc_codigo_exame'] = $exameSoc['soc_codigo_exame'];
+
         return $exame;
     }
 
@@ -212,6 +295,14 @@ class ExameController extends Controller
         $exame->numero = $exame->id;
         $exame->mensagem_medicos = $cliente->mensagem_medicos;
         $exame->imc = $this->getIMC($exame->peso, $exame->altura);
+        $exame = $this->getEnviadoDigitado($exame);
+        return $exame;
+    }
+
+    private function getEnviadoDigitado($exame) {
+        $usuario = Usuario::where(['id' => $exame['digitado']])->first();
+        $exame['enviado_por'] = $exame['enviado_por'] ? $exame['enviado_por'] : "MANUAL";
+        $exame['digitado_por'] = $usuario ? $usuario->login : "SISTEMA";
         return $exame;
     }
 
@@ -476,13 +567,17 @@ class ExameController extends Controller
         $medico->save();
     }
 
-    private function doValidate($exame) {
+    private function doValidate($exame, ?Empresa $empresa = null, ?Cliente $cliente = null) {
         if (empty($exame->cliente_id)) throw new ClienteNaoEncontradoException();
         if (empty($exame->atendimento)) throw new InclusaoDeExameException(Self::$TIPO_DE_ATENDIMENTO_NAO_INFORMADO);
         if (empty($exame->motivo_id)) throw new InclusaoDeExameException(Self::$MOTIVO_DO_EXAME_NAO_INFORMADO);
         if (empty($exame->paciente)) throw new InclusaoDeExameException(Self::$PACIENTE_NAO_INFORMADO);
         if (empty($exame->nascimento)) throw new InclusaoDeExameException(Self::$DATA_DE_NASCIMENTO_NAO_INFORMADO);
         if (empty($exame->exame_date)) throw new InclusaoDeExameException(Self::$DATA_DO_EXAME_NAO_INFORMADO);
+        
+        if(empty($empresa->soc_codigo_empresa_principal) == false && empty($cliente->soc_codigo_empresa) == false) {
+            if (empty($exame->cpf)) throw new InclusaoDeExameException('Exame de cliente com vinculo SOC requer CPF');
+        }
         $this->verificaSeAnexosOk($exame);
     }
 
@@ -504,6 +599,8 @@ class ExameController extends Controller
         if (!$cliente) throw new ClienteNaoEncontradoException();
         $usuario = $this->getUsuarioLogado($request);
         $exames = explode(',', $request->exames);
+        $soc_empresa_trabalho = [];
+        try { $soc_empresa_trabalho = json_decode($request->soc_empresa_trabalho ?? '[]', 1); } catch (\Throwable $th) {}
         foreach($exames as $exame_id) {
             $upload = $this->doFormUpload($request, $request['files_'.$exame_id]);
             $this->setMedicoSolicitante($request);
@@ -513,15 +610,18 @@ class ExameController extends Controller
             $exame->exame_id = $exame_id;
             $exame->empresa_id = $empresa->id;
             $exame->recepcionado = $cliente->id;
-            $exame->digitado = $usuario->id;
+            $exame->digitado = $usuario->id;            
             $exame = $this->parseFormFields($request, $exame, $upload);
-            $this->doValidate($exame);
+            $this->doValidate($exame, $empresa, $cliente);
             $this->cadastraPaciente($exame, $empresa);
             $reenviar = filter_var($request->reenviar, FILTER_VALIDATE_BOOLEAN) ? true : false;
             if (!$reenviar) {
                 $exame->crc = crc32($this->calcCRCFields($exame));
                 if ($this->isExameInserido($exame->crc)) continue;
             }
+
+            \App\Http\Controllers\ExameSOCController::vinculaExamesSOC($empresa, $cliente, $exame, $soc_empresa_trabalho);
+
             $exame->save();
             $exame->protocolo = $this->getProtocolo($exame->id);
             $exame->save();
@@ -652,6 +752,25 @@ class ExameController extends Controller
         $novo->visao_noturna = $exame->visao_noturna;
         $novo->visao_ofuscada = $exame->visao_ofuscada;
         $novo->profundidade = $exame->profundidade;
+
+        $novo->soc_nome_arquivo = null;
+        $novo->soc_codigo_empresa_trabalho = $exame->soc_codigo_empresa_trabalho;
+        $novo->soc_nome_empresa_trabalho = $exame->soc_nome_empresa_trabalho;
+        $novo->soc_cnpj_empresa_trabalho = $exame->soc_cnpj_empresa_trabalho;
+        $novo->soc_codigo_funcionario = $exame->soc_codigo_funcionario;
+        $novo->soc_nome_funcionario = $exame->soc_nome_funcionario;
+        $novo->soc_situacao_funcionario = $exame->soc_situacao_funcionario;
+        $novo->soc_data_cadastro_funcionario = $exame->soc_data_cadastro_funcionario;
+        $novo->soc_cpf_funcionario = $exame->soc_cpf_funcionario;
+        $novo->soc_seq_ficha = $exame->soc_seq_ficha;
+        $novo->soc_nome_exame = $exame->soc_nome_exame;
+        $novo->soc_data_exame = $exame->soc_data_exame;
+        $novo->soc_data_ficha = $exame->soc_data_ficha;
+        $novo->soc_codigo_exame = $exame->soc_codigo_exame;
+        $novo->soc_seq_resultado = $exame->soc_seq_resultado;
+        $novo->soc_resultado_alterado = 0;
+        $novo->soc_resultado_enviado = 0;
+
         $novo->save();
     }
 
@@ -667,12 +786,65 @@ class ExameController extends Controller
         if (!isset($data['id'])) return;
         $exame = Exame::where(['id' => $data['id']])->first();
         if (!$exame) throw new ExameNaoEncontradoException();
-        $exame->ativo = isset($data['ativo']) ? !$exame->ativo : $exame->ativo;
-        $exame->abonado = isset($data['abonado']) ? !$exame->abonado : $exame->abonado;
-        $exame->abonado_medico = isset($data['abonado_medico']) ? !$exame->abonado_medico : $exame->abonado_medico;
+        if (isset($data['ativo'])) {
+            $exame->ativo = !$exame->ativo;
+            $operacao = $exame->ativo ? 'Ativou exame' : 'Inativou exame';
+            $this->registraOperacao($request, $exame, $operacao);
+        }
+        if (isset($data['abonado'])) {
+            $exame->abonado = !$exame->abonado;
+            $operacao = $exame->abonado ? 'Abonou exame para cliente' : 'Restaurou abono para cliente';
+            $this->registraOperacao($request, $exame, $operacao);
+        }
+        if (isset($data['abonado_medico'])) {
+            $exame->abonado_medico = !$exame->abonado_medico;
+            $operacao = $exame->abonado ? 'Abonou exame para médico' : 'Restaurou abano para médico';
+            $this->registraOperacao($request, $exame, $operacao);
+        }
         if (isset($data['cancelado'])) {
+            if ($exame->status != Exame::$CANCELADO && file_exists(storage_path($exame->arquivo_laudo))) {
+                try {
+                    $cliente = Cliente::where('id', $exame->cliente_id)->first();
+                    $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
+                    
+                    $pdf = new \App\Utils\FPDIWatermark();
+                    $pdf->SetAutoPageBreak(false);
+                    
+                    $pageCount = $pdf->setSourceFile(storage_path($exame->arquivo_laudo));
+
+                    for ($i = 1; $i <= $pageCount; $i++) {
+                        $tplIdx = $pdf->importPage($i);
+                        $size = $pdf->getTemplateSize($tplIdx);
+
+                        $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                        $pdf->useTemplate($tplIdx, 0, 0, $size['width']);
+
+                        // Configurar cor vermelha e transparência
+                        $pdf->SetTextColor(255, 0, 0);
+                        $pdf->SetAlpha(0.4); // Ajusta a transparência (0 = totalmente transparente, 1 = opaco)
+
+                        // Rotacionar para a diagonal
+                        $pdf->SetFont('Arial', 'B', 115);
+                        $pdf->SetXY(0, 0);
+                        $pdf->StartTransform();
+                        $pdf->Rotate(45, 150, 170);
+                        $pdf->Text(0, 140, 'CANCELADO');
+                        $pdf->StopTransform();
+                    }
+                    
+                    $pdf->Output(storage_path($exame->arquivo_laudo), 'F'); // Salva o arquivo
+
+                    if (empty($cliente->soc_codigo_empresa) == false && empty($empresa->soc_codigo_empresa_principal) == false) {
+                        \App\Http\Controllers\ExameSOCController::fnUploadLaudoNoSOCGED($empresa, $cliente, $exame, ["sobreescreveArquivo" => true]);
+                    }
+                } catch (\Throwable $th) {
+                    // throw $th;
+                }
+            }
+
             $exame->status = Exame::$CANCELADO;
             $exame->laudo_cancelado_date = Carbon::now();
+            $this->registraOperacao($request, $exame, 'Laudo cancelado');
         }
         $exame->save();
         $this->clonarExameSeCancelado($this->getUsuarioLogado($request), $exame);
@@ -680,13 +852,6 @@ class ExameController extends Controller
     }
 
     private function calcCRCFields($exame) {
-        // Futuramente alterar para categoria em tipo_exames
-        // Espirometria = 3,11,12
-        // EEG = 2,7
-        // RAIOX_OIT = 9
-        // RAIO = 4
-        // ECG = 1
-
         $tipo = $exame->exame_id;
         $subTipo = $exame->sub_tipo_exame;
 
@@ -725,9 +890,27 @@ class ExameController extends Controller
         return $atual != null && $atual->status != Self::$LAUDO_IMPOSSIBILITADO;
     }
 
+    function atribuirMedico(Request $request) {
+        $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $exame = Exame::where('id', $request['body']['exame'])->first();
+        if (!$exame) throw new ExameNaoEncontradoException();
+        $medico = Medico::where('id', $request['body']['medico'])->first();
+        if (!$medico) throw new MedicoNaoEncontradoException();
+        $fixar = isset($request['body']['fixar']);
+        $operacao = $fixar ? 'fixado' : 'atribuído';
+        if (!$fixar) if ($exame->medico_id > 0) throw new ExameException(Self::$EXAME_ATRIBUIDO_A_OUTRO_MEDICO);
+        $exame->medico_id = $medico->id;
+        $exame->save();
+        $this->registraOperacao($request, $exame, 'Exame ' . $operacao . ' ao médico ' . $medico->nome);
+        return array('id' => $exame->id);
+    }
+
     function setExame(Request $request) {
         $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
         if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $cliente = Cliente::where('id', $request->cliente_id)->first();
+        if (!$cliente) throw new ClienteNaoEncontradoException();
         $this->validarRequisicao($request);
         if (isset($request->exames)) {
             return $this->doInsertNew($request);
@@ -735,15 +918,48 @@ class ExameController extends Controller
         $upload = $this->doFormUpload($request);
         $this->setMedicoSolicitante($request);
         $exame = Exame::where(['id' => $request->id])->first();
+        $anterior = Exame::where(['id' => $request->id])->first();
         if (!$exame) throw new ExameNaoEncontradoException();
         $laudoDate = $exame->laudo_date;
         $exame->fill($request->all());
         $exame = $this->parseFormFields($request, $exame, $upload);
+        $exame = $this->validaLaudoRapidoComMedico($exame, $anterior);
         $exame->laudo_date = $laudoDate;
-        $this->doValidate($exame);
+        $this->doValidate($exame, $empresa, $cliente);
         $this->cadastraPaciente($exame, $empresa);
-        $exame->save();
+        $this->doSaveExame($request, $exame, $anterior);
         return array('id' => $exame->id);
+    }
+
+    private function doSaveExame(Request $request, $exame, $anterior) {
+        $inclusao = $exame->id == 0;
+        $mudancas = $exame->getDirty();
+        if ($inclusao) {
+            $this->registraOperacao($request, $exame, 'Incluiu exame');
+        } else {
+            foreach($mudancas as $chave => $valor) {
+                if ($valor == $anterior[$chave]) continue;
+                $campo = $this->getNomeCampoLog(strtoupper($chave));
+                $this->registraOperacao($request, $exame, 'Alterou ' . $campo . ' para ' . $this->getValorCampoLog($campo, $valor));
+            }
+        }
+        $exame->save();
+    }
+
+    private function getNomeCampoLog($campo) {
+        $campo = $campo == "CONTRATANTE" ? "EMPRESA DO CLIENTE" : $campo;
+        $campo = $campo == "MOTIVO_ID" ? "MOTIVO" : $campo;
+        $campo = $campo == "MEDICO_SOLICITANTE" ? "MEDICO SOLICITANTE" : $campo;
+        $campo = $campo == "CRM_SOLICITANTE" ? "CRM SOLICITANTE" : $campo;
+        return $campo;
+    }
+
+    private function getValorCampoLog($campo, $valor) {
+        if ($campo == "MOTIVO") {
+            $motivo = MotivoExame::where('id', $valor)->first();
+            $valor = strtoupper($motivo->nome);
+        }
+        return $valor;
     }
 
 	private function doZipFiles($file_upload_list) {
@@ -794,8 +1010,16 @@ class ExameController extends Controller
     private function geraLaudo($view, $data, $medico) {
         $this->makeDir($this->storePath(Self::$PATH_LAUDOS));
         $name = Self::$PATH_LAUDOS . \Str::random(40).'.pdf';
-        $pdf = \PDF::loadView($view, $data);
-        $pdf->save($this->storePath($name));
+        
+        if (($data['exame_id'] ?? null) == 18) { // Ultrassom
+            $pdf = new \App\Services\LaudoFpdf\LaudoFpdf($data);
+            
+            file_put_contents($this->storePath($name),$pdf->laudoUS());
+        } else {
+            $pdf = \PDF::loadView($view, $data);
+            $pdf->save($this->storePath($name));
+        }
+
         $this->assinarLaudo($name, $medico);
         return $name;
     }
@@ -1297,6 +1521,7 @@ class ExameController extends Controller
         $exame->medico_id = 0;
         $exame->save();
         DespachoFila::where('medico_id', $recusa->medico_id)->delete();
+        $this->registraOperacao($request, $exame, 'Exame recusado');
         return [];
     }
 
@@ -1313,7 +1538,7 @@ class ExameController extends Controller
     private function verificaSePodeRecusar($exame, $matrizId) {
         if (!$exame) throw new ExameNaoEncontradoException();
         $medicos = ExameViewModel::getMedicosDoExame($exame->exame_id, $matrizId);
-        if (count($medicos) == 1) throw new RecusaNaoPermitidaException('Recusa não permitida [UMC]');
+        if (count($medicos) == 1) throw new RecusaNaoPermitidaException('Recusa não permitida [01]');
 
         $regra = DespachoRegra::where([
             'ativa' => 1,
@@ -1324,32 +1549,22 @@ class ExameController extends Controller
         ])->first();
 
         if ($regra && $this->regraAplicavel($regra)) { // cliente especifico e dentro do horário
-            throw new RecusaNaoPermitidaException('Recusa não permitida [REG]');
+            throw new RecusaNaoPermitidaException('Recusa não permitida [02]');
         }
 
-        $regra = DespachoRegra::where([
-            'ativa' => 1,
-            'tipo' => Self::$REGRA_TIPO_EXCLUSIVIDADE,
-            'medico_id' => $exame->medico_id,
-            'tipo_exame_id' => $exame->exame_id,
-        ])->first();
-
-        if (!$regra) return true;
-
-        // REGRA NAO APLICAVEL POR HORARIO E DIA DA SEMANA?!
-        if (!$this->regraAplicavel($regra)) return true;
-
-        // REGRA DE EXCLUSIVIDADE PARA TODOS OS CLIENTES (REG)
-        if ($regra->cliente_id == 0) throw new RecusaNaoPermitidaException('Recusa não permitida [REG]');
-
         return true;
-
     }
 
     function getSexo($exame) {
         if ($exame['sexo'] == "F") return "Feminino";
         if ($exame['sexo'] == "M") return "Masculino";
         return "";
+    }
+
+    function requerComplementoLaudo($request, $tipoExame, $exame) {
+        if ($exame->status == Self::$LAUDO_IMPOSSIBILITADO) return false;
+        if ($exame->arquivo_imagem) return false;
+        return $tipoExame->complemento_laudo && !$request->file('files');
     }
 
     function laudo(Request $request) {
@@ -1374,16 +1589,32 @@ class ExameController extends Controller
         if (!$cliente) throw new ClienteNaoEncontradoException();
 
         $exame->status = Self::$EXAME_LAUDADO;
+        $isLaudoOit = $this->isLaudoOit($exame);
+        $soc_exame_alterado = $isLaudoOit ? (($request['normal'] ?? 'S') == 'S' ? 0 : 1) : $request['soc_exame_alterado'];
 
+        $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
         if (!$this->IsNullOrEmptyString($request['impossibilidades'])) {
             $exame->opcoes_impossibilitado = $request['impossibilidades'];
             $exame->status = Self::$LAUDO_IMPOSSIBILITADO;
             $exame->crc = $exame->crc . 'I';
+        } else {
+            if (empty($cliente->soc_codigo_empresa) == false) {            
+                if (empty($empresa->soc_codigo_empresa_principal) == false) {
+                    
+                    if(empty($exame->soc_seq_resultado) == false && in_array($soc_exame_alterado, [0, 1, '0', '1'], true) === false) {
+                        throw new InclusaoDeLaudoException('O campo "SOC Exame NORMAL/ALTERADO" é obrigatório por se tratar de um exame SOC.');
+                    }
+                }
+            }
         }
+
+        if ($this->requerComplementoLaudo($request, $tipoExame, $exame)) throw new InclusaoDeLaudoException(Self::$COMPLEMENTO_LAUDO_OBRIGATORIO);
 
         $upload = $this->uploadArquivosLaudo($request);
 
+        $observacao_exame = $exame->observacoes;
         $exame->fill($request->all());
+        $exame->observacoes = $observacao_exame;
 
         $exame = $this->setRequestToDataFields($exame, $request);
 
@@ -1399,7 +1630,6 @@ class ExameController extends Controller
         $qrCode = $this->getQrCode($exame);
         $data = [
             'numero'       => $exame['id'],
-            'exame_id'     => $exame['exame_id'],
             'nome'         => $tipoExame->nome,
             'paciente'     => $exame['paciente'],
             'contratante'  => $exame['contratante'],
@@ -1436,7 +1666,7 @@ class ExameController extends Controller
 
         $view = Self::$DEFAULT_LAUDO_VIEW;
 
-        if ($this->isLaudoOit($exame)) {
+        if ($isLaudoOit) {
             $view = Self::$OIT_LAUDO_VIEW;
             $data = $this->getOitFields($request);
             $data['idade'] = $this->getIdadeOuNascimento($exame['exame_id'], $exame['nascimento']);
@@ -1457,6 +1687,7 @@ class ExameController extends Controller
             $data['yes'] = $this->storePath('/uploads/assets/yes.png');
             $data['no'] = $this->storePath('/uploads/assets/no.png');
         }
+        $data['exame_id'] = $exame['exame_id'];
 
         $exame->arquivo_laudo = $exame['exame_id'] == Self::$HOLTER
             ? $this->geraLaudoHolter($view, $data, $medico, $upload, $exame)
@@ -1465,11 +1696,36 @@ class ExameController extends Controller
 
         $exame->arquivo_laudo = $this->compoeLaudoComAnexo($exame);
 
+        /** Verifica se o cliente e a empresa tem acesso ao SOC */
+        /** Se der erro, não parar o processo */
+        $erroSOC = [];
+        if (empty($cliente->soc_codigo_empresa) == false) {
+            
+            if (empty($empresa->soc_codigo_empresa_principal) == false) {
+                $exame->soc_resultado_alterado = ($soc_exame_alterado ?? '0') == '1' ? 1 : 0;
+                
+                $exame->soc_resultado_enviado = 0;
+                try {
+                    $exame->soc_resultado_enviado = \App\Http\Controllers\ExameSOCController::fnUpdateLaudoNoSOC($empresa, $cliente, $exame);
+                } catch (\Throwable $th) {
+                    $erroSOC[] = $th->getMessage();
+                }
+
+                $exame->soc_nome_arquivo = null;
+                try {
+                    $exame->soc_nome_arquivo = \App\Http\Controllers\ExameSOCController::fnUploadLaudoNoSOCGED($empresa, $cliente, $exame);
+
+                } catch (\Throwable $th) {
+                    $erroSOC[] = $th->getMessage();
+                }
+            }
+        }
+        
         $exame->save();
 
         DespachoFila::where('medico_id', $exame->medico_id)->delete();
 
-        return ['id' => $exame->id];
+        return ['id' => $exame->id, 'erroSOC' => implode(PHP_EOL, $erroSOC)];
     }
 
     function compoeLaudoComAnexo($exame) {
@@ -1530,6 +1786,8 @@ class ExameController extends Controller
         if ($key != null) $this->registerProperties($key, 'LOTE');
 
         $file_upload_list = array();
+        
+        $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
 
         foreach ($request->file('files') as $file) {
 
@@ -1537,7 +1795,7 @@ class ExameController extends Controller
 
             $orig_name = strtolower($data['orig_name']);
             if (preg_match('/dama_imagens.zip/', $orig_name ) == 1 && !$this->isLoginCliente($request)) {
-				$this->insertIMAGENS($data);
+				$this->insertIMAGENS($data, $empresa, $cliente);
                 break;
             }
 
@@ -1571,7 +1829,8 @@ class ExameController extends Controller
 
     function upload(Request $request) {
         $key = $this->getQueryParam($request, 'key');
-        $this->registerProperties($key, 'DAMA_DESKTOP');
+        $tipoEnvio = $key == Self::$ORTHANC ? Self::$ORTHANC : 'DAMA_DESKTOP';
+        $this->registerProperties($key, $tipoEnvio);
         $request->validate([ 'file' => 'required|mimes:zip|max:512500' ]); // 50Mb
         if ($request->file()) {
             $data = $this->doUpload($request->file('file'));
@@ -1621,18 +1880,23 @@ class ExameController extends Controller
     }
 
     // =============================================================================================
+    private function getExtractFolderName($clienteId) {
+        $hashId = md5(uniqid(rand(), true));
+        return $clienteId == null ? $hashId : $clienteId;
+    }
 
     private function insertZip($data, $dama_desktop_key = null) {
 
-        if ( $dama_desktop_key == null) throw new ChaveDeTransmissaoNaoEncontradaException();
+        if ($dama_desktop_key == null) throw new ChaveDeTransmissaoNaoEncontradaException();
 
         set_time_limit(0);
 
         $cliente = $this->getClienteDoExame((object)array('DamaDesktopKey' => $dama_desktop_key));
         $CLIENTE_ID = $cliente == null ? null : $cliente->id;
-        if ($CLIENTE_ID == null) throw new ClienteNaoEncontradoException();
+        if ($CLIENTE_ID == null && $dama_desktop_key !== Self::$ORTHANC) throw new ClienteNaoEncontradoException();
 
-        $path = $data['file_path'] . $CLIENTE_ID . '/';
+        $path = $data['file_path'] . $this->getExtractFolderName($CLIENTE_ID) . '/';
+
         $path_images = $path . '/imagens/';
         $path_dcm = $data['file_path'] . '/dcm/';
 
@@ -2164,8 +2428,8 @@ class ExameController extends Controller
         }
 
         $lateralidade = $this->remove_accents(trim(strtoupper($dicom->value(0x0020, 0x0062))));  //L ou R ou vazia
-       	if ($lateralidade == "L") $tipoExame = $tipoExame ." ESQ";
-       	if ($lateralidade == "R") $tipoExame = $tipoExame ." DIR";
+       	if ($lateralidade == "L") $tipoExame = $tipoExame . " ESQ";
+       	if ($lateralidade == "R") $tipoExame = $tipoExame . " DIR";
 
         $medico = trim(str_replace('^', ' ', $dicom->value(0x0008,0x0090))); //GESSE^GOMES^BARBOSA
         $medico = $this->remove_accents($medico);
@@ -2182,26 +2446,58 @@ class ExameController extends Controller
             'id' => $id,
             'cliente' => $cliente,
             'oit' => $isOit,
-            //'exame' => $seriesDescription,
             'exame' => $patientposition,
             'subtipo' => $tipoExame,
             'medico' => $medico,
             'empresa' => $empresa,
-            'cpf' => '' // $cpf
+            'cpf' => ''
         );
 
         return $info;
 
     }
 
-    private function getBEMVIVERDICOMInfoDR($dicom) { //Thais
+    private function getCRJDICOMInfoDRVan($dicom) {
+        $cliente = strtoupper($dicom->value(0x0008,0x0080));
+        $seriesDescription = $this->remove_accents(trim(strtoupper($dicom->value(0x0008,0x103E))));
+        $bodyPartExamined = $this->remove_accents(trim(strtoupper($dicom->value(0x0018,0x0015))));
+        $patientPosition = $this->remove_accents(trim(strtoupper($dicom->value(0x0018, 0x5101))));
+        $tipoExame = $this->remove_accents(trim(strtoupper($dicom->value(0x0008, 0x103E))));
+
+        $tipo = str_replace(" ", "", $tipoExame);
+        if (strpos($tipo, "COLUNALOMBAR") !== false) $tipoExame = "COLUNA LOMBAR";
+        if (strpos($tipo, "COLUNACERVICAL") !== false) $tipoExame = "COLUNA CERVICAL";
+
+        $lateralidade = $this->remove_accents(trim(strtoupper($dicom->value(0x0020, 0x0060))));
+       	if ($lateralidade == "L") $tipoExame = $tipoExame . " - ESQ";
+       	if ($lateralidade == "R") $tipoExame = $tipoExame . " - DIR";
+        $medico = $this->remove_accents(trim(str_replace('^', ' ', $dicom->value(0x0008,0x0090))));
+       	$empresa = $this->remove_accents(trim(str_replace('^', ' ', $dicom->value(0x0010,0x4000))));
+        $id = $dicom->value(0x0020,0x000D) . '-' . $tipoExame;
+        $isOit = $seriesDescription == 'OIT PA' && $bodyPartExamined == 'THORAX';
+        $cpf = $this->onlyDigits(trim($dicom->value(0x0010, 0x0020)));
+        $info = (object)array(
+            'id' => $id,
+            'cliente' => $cliente,
+            'oit' => $isOit,
+            'exame' => $patientPosition,
+            'subtipo' => $tipoExame,
+            'medico' => $medico,
+            'empresa' => $empresa,
+            'cpf' => $cpf
+        );
+        return $info;
+    }
+
+    private function getBEMVIVERDICOMInfoDR($dicom) {
         $dicom->parse(array('InstitutionName'));   // 0x0008,0x0080
         $dicom->parse(array('StationName'));     // 0x0008,0x1010
         $dicom->parse(array('StudyDescription'));  // 0x0008,0x1030
         $dicom->parse(array('PatientID')); //    0x0010,0x0020 CPF ou RG
-        $dicom->parse(array('BodyPartExamined'));  // 0x0018,0015
-        $dicom->parse(array('ProtocolName'));  // 0x0018,1030
+        $dicom->parse(array('BodyPartExamined'));  // 0x0018, 0x0015
+        $dicom->parse(array('ProtocolName'));  // 0x0018, 0x1030
         $dicom->parse(array('ReferringPhysiciansName'));  // 0x0008,0x0090
+
         $cliente = strtoupper($dicom->value(0x0008,0x0080));  //BEM VIVER
 
         $bodypartexamined = $this->remove_accents(
@@ -2253,9 +2549,10 @@ class ExameController extends Controller
         $dicom->parse(array('StationName'));       // 0x0008,0x1010
         $dicom->parse(array('AcquisitionDeviceProcessingDescription')); // 0x0018,0x1400
 
-        if ($dicom->value(0x0008,0x1010) == 'XC_DICOM_CRJ') return $this->getCRJDICOMInfoCR($dicom);
-        if ($dicom->value(0x0008,0x0070) == 'KONICA MINOLTA') return $this->getCRJDICOMInfoDR($dicom); //Thais
-        if ($dicom->value(0x0008,0x0070) == 'Imex Medical Group') return $this->getBEMVIVERDICOMInfoDR($dicom); //Thais
+        if (trim($dicom->value(0x0008,0x1010)) == 'XC_DICOM_CRJ') return $this->getCRJDICOMInfoCR($dicom);
+        if (trim($dicom->value(0x0008,0x0070)) == 'KONICA MINOLTA') return $this->getCRJDICOMInfoDR($dicom); //Thais
+        if (trim($dicom->value(0x0008,0x0070)) == 'Imex Medical Group') return $this->getBEMVIVERDICOMInfoDR($dicom); //Thais
+        if (trim($dicom->value(0x0008,0x0070)) == 'E-COM Technology Limited.') return $this->getCRJDICOMInfoDRVan($dicom);
 
         $cliente = $dicom->value(0x0008,0x0080);
 
@@ -2338,25 +2635,58 @@ class ExameController extends Controller
 
     }
 
+    private function validarChaveTransmissao($dama_desktop_key) {
+        return strlen(trim($dama_desktop_key)) > 0 && $dama_desktop_key !== Self::$ORTHANC;
+    }
+
+    protected function setPropertiesByInstitutionName($cliente) {
+        if (!$cliente) return;
+        $empresa = Empresa::where('id', $cliente->empresa_id)->first();
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $motivo = MotivoExame::where([
+            ['empresa_id', '=',  $empresa->matriz],
+            ['padrao', '=', Self::$MARCADO],
+        ])->first();
+        if (!$motivo) throw new MotivoDeExamePadraoNaoEncontradoException();
+        Self::$LOGIN_EMPRESA_DO_DOMINIO = $empresa->login;
+        Self::$ID_EMPRESA_DO_DOMINIO = $empresa->id;
+        Self::$ID_EMPRESA_MATRIZ = $empresa->matriz;
+        Self::$ID_MOTIVO_EXAME_PADRAO = $motivo->id;
+        Self::$TIPO_ENVIO = Self::$ORTHANC;
+    }
+
+    private function getInstitutionName($data) {
+        $hex = $data ? bin2hex($data) : null;
+        return $hex ? substr($hex, 0, -2) : null;
+    }
+
+    private function getClinicaByInstitutionName($obj) {
+        $institutionNameId = $this->getInstitutionName($obj['cliente']);
+        Log::info("InstitutionNameId: " . $institutionNameId);
+        $cliente = $institutionNameId ? Cliente::where('institution_name_id', $institutionNameId)->first() : null;
+        if (!$cliente) $this->registraAlerta("InstitutionNameId " . $institutionNameId . " não encontrado!");
+        $this->setPropertiesByInstitutionName($cliente);
+        return $cliente ? $cliente->id : null;
+    }
+
     private function getClinicaIdDoDCM($obj, $dama_desktop_key){
         $usuario = $this->getSession('usuario');
         if ($usuario) return $usuario->conta_cliente;
 
-        if (strlen(trim($dama_desktop_key)) > 0){
+        if ($this->validarChaveTransmissao($dama_desktop_key)) {
             $cliente = Cliente::where('chave_transmissao', $dama_desktop_key)->first();
             if ($cliente) return $cliente->id;
         }
+
+        $clienteId = $this->getClinicaByInstitutionName($obj);
+        if ($clienteId) return $clienteId;
 
         $cnpj = $obj['cliente'];
         if ($cnpj){
             $cliente = Cliente::where('cnpj', $cnpj)->first();
             if ($cliente) return $cliente->id;
         }
-        $institutionName = $obj['cliente'];
-        if ($institutionName){
-            $cliente = Cliente::where('institution_name', $institutionName)->first();
-            if ($cliente) return $clinica->id;
-        }
+
         return null;
     }
 
@@ -2405,10 +2735,50 @@ class ExameController extends Controller
         );
     }
 
+    private function insertExameDCMPorTipo($file, $file_name, $dama_desktop_key, $params, $tipoExame){
+        $dicom = Dicom::getInstance($this->storePath($file));
+
+        $dicom->parse(array('PatientName'));        // 0x0010,0x0010
+        $dicom->parse(array('AcquisitionDate'));	// 0x0008,0x0022
+        $dicom->parse(array('PatientID'));			// 0x0010,0x0020
+        $dicom->parse(array('PatientBirthDate'));   // 0x0010,0x0030
+        $dicom->parse(array('PatientAge'));         // 0x0010,0x1010
+        $dicom->parse(array('PatientSex'));         // 0x0010,0x0040
+        $dicom->parse(array('PatientSize'));        // 0x0010,0x1020
+        $dicom->parse(array('PatientWeight'));      // 0x0010,0x1030
+
+        $exame = $this->getObject();
+        $exame->Tipo        = $tipoExame;
+        $exame->Data        = $this->toDateAAAAMMDD($dicom->value(0x0008, 0x0022));
+        $exame->Paciente    = $dicom->value(0x0010, 0x0010);
+        $exame->DataNasc    = $this->toDateAAAAMMDD($dicom->value(0x0010, 0x0030));
+        $exame->Idade       = $dicom->value(0x0010,0x1010);
+        $exame->DataNasc    = $this->getNasc($exame->Data, $exame->Idade);
+        $exame->Sexo        = $dicom->value(0x0010, 0x0040);
+        $exame->Altura      = $dicom->value(0x0010, 0x1020) / 100;
+        $exame->Peso        = $dicom->value(0x0010, 0x1030);
+        $exame->IMC         = $this->getIMC($exame->Peso, $exame->Altura);
+        $exame->Empresa     = ($params && $params['empresa']) ? $params['empresa'] : null;
+        $exame->Motivo      = null;
+        $exame->Medico      = ($params && $params['medico']) ? $params['medico'] : null;
+        $exame->Arquivo     = $file_name;
+        $exame->RG          = null;
+        $exame->Imagem      = ($params && $params['imagem']) ? $params['imagem'] : null;
+        $exame->DamaDesktopKey = $dama_desktop_key;
+        $exame->Observacao = $params['observacao'];
+
+        $exame->Paciente   = trim(str_replace('^', ' ', $exame->Paciente));
+        $exame->Paciente   = $this->str_remove($exame->Paciente, "[^A-Za-z0-9 \.\-]"); //$this->remove_accents($exame->Paciente);
+
+        $exame->Clinica_id = $params['clinica_id'];
+
+        $this->insertExame($exame, $params);
+
+    }
+
     private function insertExameDCM_ECG($file, $file_name, $dama_desktop_key, $params){
 
         $dicom = Dicom::getInstance($this->storePath($file));
-        $dicom = Self::$DICOM->getInstance($this->getStore($file));
 
         $dicom->parse(array('PatientName'));        // 0x0010,0x0010
         $dicom->parse(array('AcquisitionDate'));	// 0x0008,0x0022
@@ -2482,7 +2852,7 @@ class ExameController extends Controller
         return substr($str, $inicio, $fim - $inicio);
     }
 
-    private function insertIMAGENS($data){
+    private function insertIMAGENS($data, Empresa $empresa = null, Cliente $cliente = null){
         $path = $data['file_path'] . 'imagens/';
         if (!is_dir($path)){
             mkdir($path, 0777);
@@ -2494,7 +2864,7 @@ class ExameController extends Controller
                 $name = $zip->getNameIndex($i);
                 if (preg_match('/(\.jpg|\.JPG)/', $name) !== 1) continue;
                 $zip->extractTo($this->storePath($path), $name);
-                $this->insertIMAGEM($path, $name);
+                $this->insertIMAGEM($path, $name, $empresa, $cliente);
             }
         }
     }
@@ -2524,13 +2894,16 @@ class ExameController extends Controller
         return null;
     }
 
-    private function insertIMAGEM($path, $name) {
+    private function insertIMAGEM($path, $name, Empresa $empresa = null, Cliente $cliente = null) {
         $arquivo_id = $this->getArquivoId($name);
         $exame = $this->getExameByArquivoId($arquivo_id);
         if (!$exame) return;
         $exame->arquivo_imagem = Self::$PATH_LOTES . 'imagens/' . $name;
         $exame->imagem_date = date("Y-m-d H:i:s");
         $exame->updated_at = $exame->imagem_date;
+
+        \App\Http\Controllers\ExameSOCController::vinculaExamesSOC($empresa, $cliente, $exame);
+
         $exame->save();
     }
 
@@ -2593,6 +2966,11 @@ class ExameController extends Controller
             return;
         }
 
+        if ($tipoExame == "US") {
+            $this->insertExameDCMPorTipo($file, $file_name, $dama_desktop_key, $params, $tipoExame);
+            return;
+        }
+
         $isOit = ($params && $params['OIT'] && $params['OIT'] == 'S') ? true : false;
 
         $exame = $this->getObject();
@@ -2613,8 +2991,15 @@ class ExameController extends Controller
         $exame->Arquivo     = $file_name;
 
         if ($dicom->value(0x0008,0x0070) == 'KONICA MINOLTA') {
-            $exame->RG  = $this->onlyDigits($dicom->value(0x0010, 0x0020));
-            $exame->CPF = $this->onlyDigits($dicom->value(0x0010, 0x0020));
+            $doc = Utils::getRG_CPF($this->onlyDigits($dicom->value(0x0010, 0x0020)));
+            $exame->RG = $doc['RG'];
+            $exame->CPF = $doc['CPF'];
+        }
+
+        if (trim($dicom->value(0x0008,0x0070)) == 'E-COM Technology Limited.') {
+            $doc = Utils::getRG_CPF($this->onlyDigits($dicom->value(0x0010, 0x0020)));
+            $exame->RG = $doc['RG'];
+            $exame->CPF = $doc['CPF'];
         }
 
         $exame->Imagem      = ($params && $params['imagem']) ? $params['imagem'] : null;
@@ -2802,7 +3187,7 @@ class ExameController extends Controller
     }
 
     private function getDataNascPaciente($lote) {
-        return $lote->DataNasc ?
+        return $this->isValidDate($lote->DataNasc) ?
             $this->parse_date_to_mysql($lote->DataNasc) :
             $this->parse_date_to_mysql($this->getNasc($lote->Data, $lote->Idade));
     }
@@ -2836,9 +3221,46 @@ class ExameController extends Controller
         return $cliente->id;
     }
 
+    function saveLaudoRapido(Request $request) {
+        $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $this->validarRequisicao($request);
+
+        $login = LoginViewModel::getLogin(
+            $this->getEmpresaDoDominio($request),
+            $request['session']['login']
+        );
+
+        $isContaAdmin = ($login['isContaAdmin'] ?? 0) === 1;
+        if (!$isContaAdmin) throw new UsuarioNaoAdminException();
+
+        $id = $request['body']['id'];
+        $checked = ($request['body']['checked'] ?? false) === true;
+        $hasExame = empty($id) ? false : Exame::where('id', $id)->exists();
+        if (!$hasExame) throw new ExameNaoEncontradoException();
+
+        $exame = Exame::where('id', $id)->first();
+
+        $cliente = empty($exame->cliente_id) ? null : Cliente::where('id', $exame->cliente_id)->first();
+        if(!$cliente) throw new ClienteNaoEncontradoException();
+
+        $tipoExame = empty($exame->exame_id) ? null : TipoExame::where('id', $exame->exame_id)->first();
+        if(!$tipoExame) throw new TipoExameNaoEncontradoException();
+
+        $exame->emergencia = filter_var($checked, FILTER_VALIDATE_BOOLEAN) ?
+            Self::$LAUDO_RAPIDO :
+            Self::$LAUDO_NORMAL;
+
+        $exame->save();
+
+        return $exame;
+    }
+
     private function insertExame($lote, $params) {
         $cliente = $this->getClienteDoExame($lote);
         if(!$cliente) throw new ClienteNaoEncontradoException();
+        
+        $empresa = Empresa::where("id", $cliente->empresa_id)->first();
 
         if ($this->IsNullOrEmptyString($lote->Paciente)) return;
 
@@ -2859,7 +3281,6 @@ class ExameController extends Controller
         $exame->sexo = $lote->Sexo;
         $exame->funcao = $lote->Funcao;
         $exame->contratante = $lote->Empresa;
-        // ---------------
 
         $exame->medico_solicitante = $lote->Medico;
 
@@ -2867,7 +3288,7 @@ class ExameController extends Controller
                                   $lote->SubTipo :
                                   $lote->Tipo;
 
-        $tipo_exame = array('ECG' => 1, 'EEG' => 2, 'ESPIRO' => 3, 'RAIO' => 4, 'RAIOX_OIT' => 9);
+        $tipo_exame = array('ECG' => 1, 'EEG' => 2, 'ESPIRO' => 3, 'RAIO' => 4, 'RAIOX_OIT' => 9, 'US' => 18);
         $exame->exame_id = $tipo_exame[$lote->Tipo];
         $exame->empresa_id = Self::$ID_EMPRESA_DO_DOMINIO;
 
@@ -2897,6 +3318,8 @@ class ExameController extends Controller
 
         $exame = $this->setMotivoExameViaLote($lote, $exame);
         $exame->atendimento = Self::$ATENDIMENTO_PADRAO;
+
+        \App\Http\Controllers\ExameSOCController::vinculaExamesSOC($empresa, $cliente, $exame);
 
         $exame->save();
         $exame->protocolo = $this->getProtocolo($exame->id);
@@ -3337,10 +3760,10 @@ class ExameController extends Controller
         $exame->Medico      = null;
         $exame->Observacao  = $seriesDescription;
         $exame->Arquivo     = $file;
-
         if ($dicom->value(0x0008,0x0070) == 'KONICA MINOLTA') {
-            $exame->RG  = $dicom->value(0x0010, 0x0020);
-            $exame->CPF = $dicom->value(0x0010, 0x0020);
+            $doc = Utils::getRG_CPF($this->onlyDigits($dicom->value(0x0010, 0x0020)));
+            $exame->RG = $doc['RG'];
+            $exame->CPF = $doc['CPF'];
         }
         $exame->Imagem = $imagem;
         $exame->DamaDesktopKey = $dama_desktop_key;
@@ -3370,7 +3793,8 @@ class ExameController extends Controller
         $exame->Medico      = (string)$xml->Exame->Medicos->Solicitante->Nome;
         $exame->CRM         = (string)$xml->Exame->Medicos->Solicitante->CRM;
         $exame->Observacao  = (string)$xml->Exame->Observacoes;
-        $exame->RG          = (string)$xml->Paciente->Telefones->Residencial;
+        $exame->RG          = (strval($xml->Paciente->RG) ?? (string)$xml->Paciente->Telefones->Residencial);
+        $exame->CPF         = (strval($xml->Paciente->CPF) ?? null);
         $exame->Arquivo     = $file_name;
         $exame->Imagem      = ($params && $params['imagem']) ? $params['imagem'] : null;
         $this->insertExame($exame, $params);
@@ -3398,8 +3822,8 @@ class ExameController extends Controller
         $exame->IMC         = $this->getIMC($exame->Peso, $exame->Altura);
         $exame->Medico      = (string)$xml->Paciente->Medico;
         $exame->Observacao  = (string)$xml->Paciente->Obs;
-        $exame->RG          = (string)$xml->Paciente->Fone;
-        $exame->CPF         = (string)$xml->Paciente->Celular;
+        $exame->RG          = (strval($xml->Paciente->RG) ?? (string)$xml->Paciente->Fone);
+        $exame->CPF         = (strval($xml->Paciente->CPF) ?? (string)$xml->Paciente->Celular);
         $exame->Arquivo     = $file_name;
         $exame->Imagem      = ($params && $params['imagem']) ? $params['imagem'] : null;
         $exame->Empresa = (string)$xml->Paciente->Email;
@@ -3439,7 +3863,7 @@ class ExameController extends Controller
 
     function insertMDT($file, $file_name, $dama_desktop_key, $params) {
         $xml = $this->getBytes($this->storePath($file));
-        $start = strpos($xml, "<?xml");
+        $start = strpos($xml, '<' . '?' . 'xml');
         $stop  = strpos($xml, "</datest>");
         $xml = substr($xml, $start, $stop + 9 - $start);
 
@@ -4396,7 +4820,49 @@ class ExameController extends Controller
         $exame->pausado = date('Y-m-d H:i:s');
         $exame->save();
         return [];
-
     }
 
+    public function retirarPausaMedico(Request $request) {
+        $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $this->validarRequisicao($request);
+
+        $login = LoginViewModel::getLogin(
+            $this->getEmpresaDoDominio($request),
+            $request['session']['login']
+        );
+
+        $isContaAdmin = ($login['isContaAdmin'] ?? 0) === 1;
+        if (!$isContaAdmin) throw new UsuarioNaoAdminException();
+
+        $id = $request['body']['id'];
+        $hasExame = empty($id) ? false : Exame::where('id', $id)->exists();
+        if (!$hasExame) throw new ExameNaoEncontradoException();
+
+        $exame = Exame::where('id', $id)->first();
+
+        $cliente = empty($exame->cliente_id) ? null : Cliente::where('id', $exame->cliente_id)->first();
+        if(!$cliente) throw new ClienteNaoEncontradoException();
+
+        $tipoExame = empty($exame->exame_id) ? null : TipoExame::where('id', $exame->exame_id)->first();
+        if(!$tipoExame) throw new TipoExameNaoEncontradoException();
+
+        $exame->pausado = null;
+        $exame->medico_id = 0;
+
+        $exame->save();
+
+        return $exame;
+    }
+
+    function serverProcessingExameAntigo(Request $request) {
+        $this->validarRequisicao($request);
+        $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
+        $usuario = Usuario::where('login', $request['session']['login'])->first();
+        $status = isset($request['body']) && isset($request['body']['status']) ? $request['body']['status'] : '';
+
+        if ($usuario == null) throw new UsuarioNaoEncontradoException();
+
+        return Exame::serverProcessingExamesAntigos($empresa, $usuario, $status);
+    }
 }

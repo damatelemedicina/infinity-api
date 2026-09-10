@@ -108,33 +108,41 @@ class UsuarioController extends Controller
 
     }
 
+    private function getUsuarioData($usuarioId) {
+        $usuario = Usuario::where('id', $usuarioId)->first();
+        if (!$usuario) throw new UsuarioNaoEncontradoException();
+        $result = array(
+            'UsuarioId' => $usuario->id,
+            'UsuarioLogin' => $usuario->login,
+            'UsuarioNome' => $usuario->nome,
+            'UsuarioEmail' => $usuario->email,
+            'UsuarioSenha' => $usuario->senha,
+            'UsuarioCpf' => $usuario->cpf,
+            'UsuarioDeviceId' => $usuario->device_id,
+            'UsuarioDeviceCode' => $usuario->device_code,
+            'UsuarioV2' => $usuario->v2,
+            'UsuarioRestringirExmaes' => $usuario->restringir_exames,
+            'UsuarioSituacao' => $usuario->situacao,
+            'UsuarioContaCliente' => $usuario->conta_cliente,
+            'UsuarioContaMedico' => $usuario->conta_medico,
+            'UsuarioEmpresaId' => $usuario->empresa_id,
+            'UsuarioPerfilId' => $usuario->perfil_id,
+            'UsuarioInativo' => $usuario->inativo,
+            'UsuarioSistema' => $usuario->sistema,
+            'UsuarioAcessos' => array()
+        );
+        $acessos = Acesso::where('usuario_id', $usuarioId)->get();
+        foreach($acessos as $acesso) {
+            $result['UsuarioAcessos'][] = array(
+                'EmpresaId' => $acesso->empresa_id
+            );
+        }
+        return $result;
+    }
     public function getUsuario(Request $request)
     {
-
         $this->validarRequisicao($request, Self::$BODY_REQUIRED);
-
-        $usuario = $this->entity->findOne(
-            'usuarios',
-            ['where' => ['usuarios.id = ', $request['body']['id']]],
-            Self::$ENTITY_WITH_CHILDS
-        );
-
-        if (!$usuario) throw new UsuarioNaoEncontradoException();
-
-        /*
-        $permissoes = $this->entity->findAll(
-            'permissaos',
-            ['where' => [ 'permissaos.perfil_id = ', $usuario->UsuarioPerfilId]]
-        );
-
-        Log::Debug('Permissoes ================================================');
-        Log::Debug('Usuario->perfil_id: ' . $usuario->UsuarioPerfilId);
-        Log::Debug(print_r($permissoes, true));
-        Log::Debug('Permissões ================================================');
-        */
-
-        return $usuario;
-
+        return $this->getUsuarioData($request['body']['id']);
     }
 
     public function setUsuario(Request $request)
@@ -157,8 +165,11 @@ class UsuarioController extends Controller
         $usuario->email = $data['UsuarioEmail'];
         $usuario->cpf = $data['UsuarioCpf'];
         $usuario->v2 = $data['UsuarioV2'] ? Usuario::$V2_ATIVO : Usuario::$V2_INATIVO;
+        $usuario->restringir_exames = $data['UsuarioRestringirExames'] ? 1 : 0;
         $usuario->device_id = $data['UsuarioRegistrado'] ? $usuario->device_id : null;
         $usuario->situacao = $data['UsuarioBloquear'] ? Usuario::$BLOQUEADO : Usuario::$ATIVO;
+        $usuario->inativo = $data['UsuarioInativo'] ? 1 : 0;
+        $usuario->sistema = filter_var($data['UsuarioSistema'], FILTER_VALIDATE_BOOLEAN);
 
         if (isset($data['UsuarioContaCliente'])) {
             $usuario->conta_cliente = $data['UsuarioContaCliente'];
@@ -216,6 +227,21 @@ class UsuarioController extends Controller
         $usuario->senha = Hash::make($data['NovaSenha']);
         $usuario->save();
         return [];
+    }
+
+    public function serverProcessingUsuario(Request $request) {
+        $this->validarRequisicao($request);
+
+        $dominio = $this->getEmpresaDoDominio($request);
+
+        $empresa = $this->entity->findOne(
+            'empresas',
+            ['where' => ['empresas.login = ', $dominio]]
+        );
+
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+
+        return Usuario::serverProcessing($empresa->EmpresaMatriz, $empresa->EmpresaId);
     }
 
 }

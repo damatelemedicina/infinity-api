@@ -12,7 +12,6 @@ use App\Exceptions\CampoTipoExameNaoEncontradoException;
 use App\Exceptions\RequisicaoMalFormadaException;
 use App\Exceptions\ExclusaoNaoPermitidaException;
 use App\Exceptions\MedicoNaoEncontradoException;
-
 use App\Models\TipoExame;
 use App\Models\TipoExameCampo;
 use App\Models\Servico;
@@ -133,6 +132,14 @@ class TipoExameController extends Controller
         $tipoExame->laudo_rapido=$data['TipoExameLaudoRapido'];
         $tipoExame->desativar_modelo=$data['TipoExameDesativarModelo'];
         $tipoExame->desativar_upload=$data['TipoExameDesativarUpload'];
+        $tipoExame->tempo_laudo = is_numeric($data['TipoExameTempoLaudo']) ? $data['TipoExameTempoLaudo'] : 0;
+        $tipoExame->fumante = $data['TipoExameFumante'];
+        $tipoExame->peso_altura = $data['TipoExamePesoAltura'];
+        $tipoExame->complemento_laudo=$data['TipoExameComplementoLaudo'];
+
+        $tipoExame->soc_codigo_exame = $data['soc_codigo_exame'] ?? null;
+        $tipoExame->soc_nao_envia_texto_laudo = ($data['soc_nao_envia_texto_laudo'] ?? 0) === 1 ? 1 : 0;
+
         $tipoExame->save();
 
         //$this->clonarCampos($tipoExame->id, $data);
@@ -166,6 +173,11 @@ class TipoExameController extends Controller
         );
 
         if (!$tipoExame) throw new TipoExameNaoEncontradoException();
+
+        $tipoExameWhere = TipoExame::where('id', $request['body']['id'])->first();
+
+        $tipoExame->soc_codigo_exame = $tipoExameWhere->soc_codigo_exame;
+        $tipoExame->soc_nao_envia_texto_laudo = (($tipoExameWhere->soc_nao_envia_texto_laudo ?? 0) == 1) ? 1 : 0;
 
         return $tipoExame;
 

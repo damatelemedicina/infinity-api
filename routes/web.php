@@ -3,17 +3,20 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\DeviceController;
+use App\Http\Controllers\DocumentoController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\FichaController;
+use App\Models\Documento;
 use Illuminate\Http\Request;
 
 use Carbon\Carbon;
 
 use App\Utils\Utils;
 use App\Models\Exame;
+use Illuminate\Support\Facades\DB;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,7 +29,7 @@ use App\Models\Exame;
 |
 */
 
-Route::group(['prefix' => 'device'], function() {
+Route::group(['prefix' => 'device'], function () {
     Route::post('/h',  [DeviceController::class, 'getDeviceHash']);
     Route::post('/vr', [DeviceController::class, 'doValidateDevice']);
     Route::post('/lh', [DeviceController::class, 'doValidateRegister']);
@@ -51,11 +54,36 @@ Route::post('/setPerfil', [PerfilController::class, 'setPerfil']);
 
 Route::post('/getFicha', [FichaController::class, 'getFicha']);
 
-Route::get('/', function () {
-    return view('welcome');
+if (!function_exists('getProtocol')) {
+    function getProtocol()
+    {
+        return strpos($_SERVER['SERVER_PROTOCOL'], 'HTTPS') === false ? 'http://' : 'https://';
+    }
+}
+
+if (!function_exists('getWebPort')) {
+    function getWebPort()
+    {
+        return getenv('WEB_PORT') ? ':' . getenv('WEB_PORT') : '';
+    }
+}
+
+if (!function_exists('getWebFullUrl')) {
+    function getWebFullUrl()
+    {
+        $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : null;
+        if ($host == null) abort(401);
+        $port =  isset($_SERVER['SERVER_PORT']) ? $_SERVER['SERVER_PORT'] : null;
+        $host = $port == null ? $host : str_replace(':' . $port, '', $host);
+        return getProtocol() . $host . getWebPort();
+    }
+}
+
+Route::get('/', function (Request $request) {
+    return \Redirect::to(getWebFullUrl());
 });
 
-Route::get('/relatorio', function(Request $request) {
+Route::get('/relatorio', function (Request $request) {
     $path = storage_path('/app/' . $request->name);
     if (!File::exists($path)) {
         abort(404);
@@ -63,7 +91,7 @@ Route::get('/relatorio', function(Request $request) {
     return \Response::download($path);
 });
 
-Route::get('/exportar', function(Request $request) {
+Route::get('/exportar', function (Request $request) {
     $path = storage_path($request->name);
     if (!File::exists($path)) {
         abort(404);
@@ -71,25 +99,39 @@ Route::get('/exportar', function(Request $request) {
     return \Response::download($path);
 });
 
-Route::get('/download', function(Request $request) {
+Route::get('/download', function (Request $request) {
     $path = storage_path($request->name);
     if (!File::exists($path)) {
         abort(404);
     }
     $exame = Exame::where('id', $request->id)->first();
     if (!$exame) {
-        abort(404);
+        $exame = DB::table('exames_antigos')
+            ->where('id', $request->id)
+            ->first();
+
+        if (!$exame) {
+            abort(404);
+        } else {
+            DB::table('exames_antigos')
+                ->where('id', $request->id)
+                ->update([
+                    'laudo_download_date' => Carbon::now(),
+                ]);
+        }
+    } else {
+        $exame->laudo_download_date = Carbon::now();
+        $exame->save();
     }
-    $exame->laudo_download_date = Carbon::now();
-    $exame->save();
+
     if ($request->laudo) {
         $name = Utils::getNomeLaudoParaDownload($exame);
-        return \Response::download($path, $name);
+        return \Response::download($path, $name, ['Access-Control-Expose-Headers' => 'Content-Disposition']);
     }
     return \Response::download($path);
 });
 
-Route::get('/retirada', function(Request $request) {
+Route::get('/retirada', function (Request $request) {
     $exame = Exame::where('protocolo', $request->id)->first();
     if (!$exame) {
         abort(404);
@@ -104,7 +146,7 @@ Route::get('/retirada', function(Request $request) {
     return response()->download($path, $name);
 });
 
-Route::get('/image', function(Request $request) {
+Route::get('/image', function (Request $request) {
 
     $path = storage_path($request->name);
 
@@ -119,10 +161,9 @@ Route::get('/image', function(Request $request) {
     $response->header("Content-Type", $type);
 
     return $response;
-
 });
 
-Route::get('/sound', function(Request $request) {
+Route::get('/sound', function (Request $request) {
 
     $path = storage_path($request->name);
 
@@ -137,6 +178,31 @@ Route::get('/sound', function(Request $request) {
     $response->header("Content-Type", $type);
 
     return $response;
-
 });
 
+Route::get('uploads/temp/{uuid}', function (string $uuid) {
+    if (!\request()->hasValidSignature(false)) {
+        abort(401);
+    }
+
+    $decodedUuid = urldecode($uuid);
+
+    /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+    $disk = \Illuminate\Support\Facades\Storage::disk('uploads');
+
+    /** @var \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder $query */
+    $query = Documento::query();
+
+    $documento = $query->where('uuid', $decodedUuid)
+        ->first(["rawfilename", "filename"]);
+
+    // $query->dd();
+    if (!$documento || $disk->exists(DocumentoController::COMPARTILHAMENTO_FOLDER_NAME . '/' . $documento->rawfilename) == false) {
+        abort(404);
+    }
+
+    // se for imagem || pdf: response
+    if (str_contains($documento->rawfilename, '.pdf') || str_contains($documento->rawfilename, '.jpg') || str_contains($documento->rawfilename, '.jpeg') || str_contains($documento->rawfilename, '.png'))
+        return $disk->response(DocumentoController::COMPARTILHAMENTO_FOLDER_NAME . '/' . $documento->rawfilename, $documento->filename);
+    return $disk->download(DocumentoController::COMPARTILHAMENTO_FOLDER_NAME . '/' . $documento->rawfilename, $documento->filename);
+})->name('uploads.temp');

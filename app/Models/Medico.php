@@ -15,6 +15,7 @@ class Medico extends Model
 
     public static $ATIVO = 0;
     public static $BLOQUEADO = 1;
+    public static $INATIVO = 1;
 
     public function exames() {
         $exames = MedicoExame::where('medico_id', $this->id)->get();
@@ -23,8 +24,17 @@ class Medico extends Model
             if (!$tipoExame) continue;
             $exame['tipo_exame_nome'] = $tipoExame->nome;
             $exame['recusa'] = $exame->recusa;
+            $exame['tempo'] = $tipoExame->tempo_laudo;
         }
         return $exames;
+    }
+
+    public function realizaExame($tipo_exame_id) {
+        $exames = MedicoExame::where('medico_id', $this->id)->get();
+        foreach ($exames as $exame) {
+            if ($exame->tipo_exame_id == $tipo_exame_id) return true;
+        }
+        return false;
     }
 
     public function modelos() {

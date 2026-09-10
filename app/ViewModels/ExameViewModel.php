@@ -8,21 +8,21 @@ class ExameViewModel extends BaseViewModel
     {
     }
 
-    public static function getExamesDaEmpresa($id, $ativos)
+    public static function getExamesDaEmpresa($id, $ativos, $data_inicio_pesquisa= '', $data_fim_pesquisa = '', $limit_pesquisa = '20000', $offset_pesquisa = '')
     {
-        $sql = "CALL GetExamesDaEmpresa('{$id}', '{$ativos}')";
+        $sql = "CALL GetExamesDaEmpresa('{$id}', '{$ativos}', '{$data_inicio_pesquisa}', '{$data_fim_pesquisa}', '{$limit_pesquisa}', '{$offset_pesquisa}')";
         return Self::callStoredProcedure($sql);
     }
 
-    public static function getExamesDoCliente($id, $ativos)
+    public static function getExamesDoCliente($id, $ativos, $usuarioId, $data_inicio_pesquisa= '', $data_fim_pesquisa = '', $limit_pesquisa = '20000', $offset_pesquisa = '')
     {
-        $sql = "CALL GetExamesDoCliente('{$id}', '{$ativos}')";
+        $sql = "CALL GetExamesDoCliente('{$id}', '{$ativos}', '{$usuarioId}', '{$data_inicio_pesquisa}', '{$data_fim_pesquisa}', '{$limit_pesquisa}', '{$offset_pesquisa}')";
         return Self::callStoredProcedure($sql);
     }
 
-    public static function getExamesDoMedico($id, $ativos)
+    public static function getExamesDoMedico($id, $ativos, $data_inicio_pesquisa= '', $data_fim_pesquisa = '', $limit_pesquisa = '20000', $offset_pesquisa = '')
     {
-        $sql = "CALL GetExamesDoMedico('{$id}', '{$ativos}')";
+        $sql = "CALL GetExamesDoMedico('{$id}', '{$ativos}', '{$data_inicio_pesquisa}', '{$data_fim_pesquisa}', '{$limit_pesquisa}', '{$offset_pesquisa}')";
         return Self::callStoredProcedure($sql);
     }
 
