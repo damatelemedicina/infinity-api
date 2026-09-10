@@ -51,7 +51,7 @@ class OrthancExameImporter extends ExameController
         $cliente = $institutionNameId ? Cliente::where('institution_name_id', $institutionNameId)->first() : null;
         if (!$cliente) {
             $mensagem = "OrthancSync: instância {$instanceId} sem Cliente correspondente. "
-                . "InstitutionName=[" . trim((string) $institutionNameRaw) . "] "
+                . "InstitutionName=[" . $this->sanitizeTextForDisplay($institutionNameRaw) . "] "
                 . "InstitutionNameId=[" . ($institutionNameId ?? '(vazio)') . "] — "
                 . "cadastre esse Institution Name Id no cliente correto pra próxima vez ser reconhecido.";
             Log::warning($mensagem);
@@ -93,6 +93,31 @@ class OrthancExameImporter extends ExameController
         }
 
         return substr(bin2hex($institutionNameRaw), 0, -2);
+    }
+
+    /**
+     * DICOM devices often send non-UTF8 bytes (commonly Windows-1252/Latin-1
+     * for accented characters, via SpecificCharacterSet ISO_IR 100) in text
+     * tags like InstitutionName. Storing that raw in a UTF-8 MySQL column
+     * (e.g. operacoes.operacao) throws error 1366 and silently drops the
+     * alert — this is display-only sanitization, never used in the byte-exact
+     * computeInstitutionNameId() matching above.
+     */
+    protected function sanitizeTextForDisplay(?string $value): string
+    {
+        $value = trim((string) $value);
+        if ($value === '' || mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+
+        $converted = @mb_convert_encoding($value, 'UTF-8', 'Windows-1252');
+        if ($converted !== false && mb_check_encoding($converted, 'UTF-8')) {
+            return $converted;
+        }
+
+        // Last resort: substitute whatever still isn't valid UTF-8 rather
+        // than let a second encoding fail the DB insert again.
+        return mb_convert_encoding($value, 'UTF-8', 'UTF-8');
     }
 
     /**
