@@ -5,6 +5,7 @@ namespace App\Services\Orthanc;
 use App\Http\Controllers\ExameController;
 use App\Models\Cliente;
 use App\Utils\Dicom;
+use App\Utils\OrthancInstitutionName;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -88,11 +89,7 @@ class OrthancExameImporter extends ExameController
      */
     protected function computeInstitutionNameId(?string $institutionNameRaw): ?string
     {
-        if (!$institutionNameRaw) {
-            return null;
-        }
-
-        return substr(bin2hex($institutionNameRaw), 0, -2);
+        return OrthancInstitutionName::computeIdFromRawBytes($institutionNameRaw);
     }
 
     /**

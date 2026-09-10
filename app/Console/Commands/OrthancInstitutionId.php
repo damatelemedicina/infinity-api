@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Utils\OrthancInstitutionName;
 use Illuminate\Console\Command;
 
 /**
@@ -23,13 +24,7 @@ class OrthancInstitutionId extends Command
     public function handle(): int
     {
         $texto = $this->argument('texto');
-
-        // DICOM pads string values to an even byte length with a trailing
-        // space when needed; the matching code always drops the last byte.
-        // Simulating that padding here keeps this in sync with real DICOM
-        // instances of either length.
-        $padded = strlen($texto) % 2 !== 0 ? $texto . ' ' : $texto;
-        $id = substr(bin2hex($padded), 0, -2);
+        $id = OrthancInstitutionName::computeIdFromText($texto);
 
         $this->info("Texto:                 {$texto}");
         $this->info("InstitutionNameId:      {$id}");
