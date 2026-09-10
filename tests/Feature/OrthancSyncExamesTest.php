@@ -24,11 +24,11 @@ use Mockery;
  */
 class StubbedOrthancExameImporter extends OrthancExameImporter
 {
-    public ?Cliente $stubCliente = null;
+    public ?string $stubInstitutionNameId = null;
 
-    protected function resolveClienteByInstitutionName(?string $institutionNameRaw): ?Cliente
+    protected function computeInstitutionNameId(?string $institutionNameRaw): ?string
     {
-        return $this->stubCliente;
+        return $this->stubInstitutionNameId;
     }
 }
 
@@ -36,6 +36,7 @@ class OrthancSyncExamesTest extends TestCase
 {
     private Empresa $empresa;
     private Cliente $cliente;
+    private string $institutionNameId;
 
     protected function setUp(): void
     {
@@ -64,7 +65,8 @@ class OrthancSyncExamesTest extends TestCase
         $this->cliente->situacao = 0;
         $this->cliente->inativo = 0;
         $this->cliente->chave_transmissao = 'CHAVE-TESTE-' . uniqid();
-        $this->cliente->institution_name_id = 'unused-' . uniqid();
+        $this->institutionNameId = 'stub-' . uniqid();
+        $this->cliente->institution_name_id = $this->institutionNameId;
         $this->cliente->save();
     }
 
@@ -93,7 +95,7 @@ class OrthancSyncExamesTest extends TestCase
     public function test_importer_creates_exame_when_institution_resolves()
     {
         $importer = new StubbedOrthancExameImporter();
-        $importer->stubCliente = $this->cliente;
+        $importer->stubInstitutionNameId = $this->institutionNameId;
 
         $countBefore = Exame::count();
 
@@ -110,7 +112,7 @@ class OrthancSyncExamesTest extends TestCase
     public function test_importer_is_idempotent_for_the_same_instance_content()
     {
         $importer = new StubbedOrthancExameImporter();
-        $importer->stubCliente = $this->cliente;
+        $importer->stubInstitutionNameId = $this->institutionNameId;
 
         $bytes = $this->sampleDcmBytes();
 
@@ -131,7 +133,7 @@ class OrthancSyncExamesTest extends TestCase
         $this->cliente->save();
 
         $importer = new StubbedOrthancExameImporter();
-        $importer->stubCliente = $this->cliente;
+        $importer->stubInstitutionNameId = $this->institutionNameId;
 
         $countBefore = Exame::count();
         $result = $importer->importInstance($this->sampleDcmBytes(), 'fake-instance-no-key');

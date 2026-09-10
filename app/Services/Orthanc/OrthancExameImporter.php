@@ -46,10 +46,16 @@ class OrthancExameImporter extends ExameController
         $dicom = Dicom::getInstance($localPath);
         $dicom->parse(['InstitutionName']);
         $institutionNameRaw = $dicom->value(0x0008, 0x0080);
+        $institutionNameId = $this->computeInstitutionNameId($institutionNameRaw);
 
-        $cliente = $this->resolveClienteByInstitutionName($institutionNameRaw);
+        $cliente = $institutionNameId ? Cliente::where('institution_name_id', $institutionNameId)->first() : null;
         if (!$cliente) {
-            Log::warning("OrthancSync: instância {$instanceId} sem Cliente correspondente para InstitutionName, ignorada.");
+            $mensagem = "OrthancSync: instância {$instanceId} sem Cliente correspondente. "
+                . "InstitutionName=[" . trim((string) $institutionNameRaw) . "] "
+                . "InstitutionNameId=[" . ($institutionNameId ?? '(vazio)') . "] — "
+                . "cadastre esse Institution Name Id no cliente correto pra próxima vez ser reconhecido.";
+            Log::warning($mensagem);
+            $this->tentaRegistrarAlerta($mensagem);
             @unlink($localPath);
             return false;
         }
@@ -69,19 +75,39 @@ class OrthancExameImporter extends ExameController
     }
 
     /**
-     * Mirrors ExameController::getInstitutionName() + getClinicaByInstitutionName():
-     * Orthanc/DICOM pads short strings with a trailing null byte, hence the
-     * "drop the last hex byte" trim before matching Cliente.institution_name_id.
+     * Mirrors ExameController::getInstitutionName(): Orthanc/DICOM pads short
+     * strings with a trailing null byte, hence the "drop the last hex byte"
+     * trim before matching Cliente.institution_name_id.
+     *
+     * IMPORTANT: this does NOT match how the web UI's "Gerar Institution Name
+     * Id" checkbox computes the value (plain bin2hex(text), no trim) — typing
+     * the institution name into the client form and letting it "Gerar" will
+     * usually produce a value one byte too long to ever match a real DICOM
+     * instance. Always paste the exact InstitutionNameId logged/alerted here
+     * into the client's "Institution Name Id" field instead of generating it.
      */
-    protected function resolveClienteByInstitutionName(?string $institutionNameRaw): ?Cliente
+    protected function computeInstitutionNameId(?string $institutionNameRaw): ?string
     {
         if (!$institutionNameRaw) {
             return null;
         }
 
-        $hex = bin2hex($institutionNameRaw);
-        $institutionNameId = substr($hex, 0, -2);
+        return substr(bin2hex($institutionNameRaw), 0, -2);
+    }
 
-        return Cliente::where('institution_name_id', $institutionNameId)->first();
+    /**
+     * Surfaces unmatched-institution warnings in the app's own Operações
+     * screen (registraAlerta), not just the server log, so whoever manages
+     * clientes can actually see and act on it. Uses the "sistema" user/cliente
+     * (no login session exists in this CLI context) — if those aren't set up,
+     * this silently falls back to the Log::warning already issued by the caller.
+     */
+    protected function tentaRegistrarAlerta(string $mensagem): void
+    {
+        try {
+            $this->registraAlerta($mensagem);
+        } catch (\Throwable $e) {
+            Log::debug('OrthancSync: não foi possível registrar alerta em Operações: ' . $e->getMessage());
+        }
     }
 }
