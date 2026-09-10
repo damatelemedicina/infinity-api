@@ -17,7 +17,7 @@ class ContaController extends Controller
     private static $TODAY_IF_NULL = true;
 
     private function doValidate($data) {
-        if ($this->isNullOrEmptyValue($data['ContaDescricao'])) throw new CadastroException("Descrição do lançamento não informado!");
+        if ($this->isNullOrEmptyValue($data['TipoContaDescricao'])) throw new CadastroException("Tipo do lançamento não informado!");
         if ($this->isNullOrEmptyValue($data['ContaCliente'])) throw new CadastroException("Cliente não informado!");
         if (!is_numeric($data['ContaValor'])  || $data['ContaValor'] == 0) throw new CadastroException(Self::$VALORES_NAO_INFORMADOS);
         return $data;
@@ -30,8 +30,13 @@ class ContaController extends Controller
         $conta = isset($data['ContaId']) ? Conta::where('id', $data['ContaId'])->first() : new Conta();
         $conta->empresa_id = $empresa->id;
         $conta->cliente_id = $data['ContaCliente'];
-        $conta->descricao = $data['ContaDescricao'];
-        $conta->valor = $data['ContaValor'];
+
+        $ContaDescricao = (strpos($data['ContaDescricao'], ' -') !== false && in_array(strpos($data['ContaDescricao'], ' -'),[6,7])
+            ? trim(substr($data['ContaDescricao'], strpos($data['ContaDescricao'], ' -') + 2))
+            : $data['ContaDescricao']);
+            
+        $conta->descricao = ("{$data['TipoContaDescricao']}".(empty($ContaDescricao)?'':" - {$ContaDescricao}"));
+        $conta->valor = abs($data['ContaValor']) * ($data['TipoContaDescricao']=='DÉBITO' ? -1 : 1);
         $conta->data = $this->toDateTime($data['ContaData'], Self::$TODAY_IF_NULL);
         $conta->save();
         return ['id' => $conta->id ];
@@ -40,6 +45,9 @@ class ContaController extends Controller
     function getConta(Request $request) {
         $this->validarRequisicao($request, Self::$BODY_REQUIRED);
         $conta = Conta::where('id', $request['body']['id'])->first();
+        $auxExplode = explode(" - ",$conta["descricao"]);
+        $conta["tipo"] = \App\Utils\Utils::convert_strtoupper($auxExplode[0]);
+        $conta["descricao"] = $auxExplode[1]??'';
         if (!$conta) throw new CadastroException("Conta não encontrado!");
         return $conta;
     }

@@ -25,8 +25,14 @@ use App\Http\Controllers\FinanceiroController;
 use App\Http\Controllers\RelatorioController;
 use App\Http\Controllers\EquipamentoController;
 use App\Http\Controllers\ContaController;
+use App\Http\Controllers\DocumentoController;
+use App\Http\Controllers\ExameSOCController;
 use App\Http\Controllers\RecadoController;
 use App\Http\Controllers\PainelController;
+use Illuminate\Support\Facades\File;
+use App\Http\Controllers\OperacaoController;
+use App\Http\Controllers\TipoDocumentoController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -38,139 +44,178 @@ use App\Http\Controllers\PainelController;
 |
 */
 
-Route::group(['prefix' => 'device'], function() {
+Route::group(['prefix' => 'device'], function () {
     Route::post('/h',  [DeviceController::class, 'getDeviceHash']);
     Route::post('/vr', [DeviceController::class, 'doValidateDevice']);
     Route::post('/lh', [DeviceController::class, 'doValidateRegister']);
     Route::post('/c',  [DeviceController::class, 'getValidateCode']);
 });
 
-Route::group(['prefix' => 'exame'], function() {
+Route::group(['prefix' => 'exame'], function () {
     Route::post('/getCampos', [ExameController::class, 'getCampos']);
     Route::post('/setProcedimento', [ProcedimentoController::class, 'setProcedimento']);
 });
 
-Route::group(['prefix' => 'gestao'], function() {
+Route::group(['prefix' => 'gestao'], function () {
     Route::post('/upload', [GestaoController::class, 'upload']);
 });
 
-Route::group(['prefix' => 'sistema'], function() {
+Route::group(['prefix' => 'sistema'], function () {
     Route::post('/exames/upload', [ExameController::class, 'upload']);
     Route::get('/laudos/download', [ExameController::class, 'download']);
 });
 
-Route::post('/auth', [LoginController::class, 'doAuthenticate']);
+Route::middleware(['apiToken'])->group(function () {
 
-Route::post('/getUsuarioLogado', [UsuarioController::class, 'getUsuarioLogado']);
-Route::post('/getUsuarios', [UsuarioController::class, 'getUsuarios']);
-Route::post('/getUsuario', [UsuarioController::class, 'getUsuario']);
-Route::post('/setUsuario', [UsuarioController::class, 'setUsuario']);
+    Route::post('/auth', [LoginController::class, 'doAuthenticate']);
 
-Route::post('/getEmpresas', [EmpresaController::class, 'getEmpresas']);
-Route::post('/setEmpresa', [EmpresaController::class, 'setEmpresa']);
-Route::post('/delEmpresa', [EmpresaController::class, 'delEmpresa']);
-Route::post('/getEmpresa', [EmpresaController::class, 'getEmpresa']);
+    Route::post('/getUsuarioLogado', [UsuarioController::class, 'getUsuarioLogado']);
+    Route::post('/getUsuarios', [UsuarioController::class, 'getUsuarios']);
+    Route::post('/getUsuariosDoCliente', [UsuarioController::class, 'getUsuariosDoCliente']);
+    Route::post('/getUsuario', [UsuarioController::class, 'getUsuario']);
+    Route::post('/setUsuario', [UsuarioController::class, 'setUsuario']);
+    Route::post('/serverProcessingUsuario', [UsuarioController::class, 'serverProcessingUsuario']);
+    Route::get('/serverProcessingUsuario', [UsuarioController::class, 'serverProcessingUsuario']);
 
-Route::post('/getPerfis', [PerfilController::class, 'getPerfis']);
-Route::post('/getPerfil', [PerfilController::class, 'getPerfil']);
-Route::post('/setPerfil', [PerfilController::class, 'setPerfil']);
+    Route::post('/getEmpresas', [EmpresaController::class, 'getEmpresas']);
+    Route::post('/setEmpresa', [EmpresaController::class, 'setEmpresa']);
+    Route::post('/delEmpresa', [EmpresaController::class, 'delEmpresa']);
+    Route::post('/getEmpresa', [EmpresaController::class, 'getEmpresa']);
 
-Route::post('/getTipoExames', [TipoExameController::class, 'getTipoExames']);
-Route::post('/getTipoExame', [TipoExameController::class, 'getTipoExame']);
-Route::post('/setTipoExame', [TipoExameController::class, 'setTipoExame']);
-Route::post('/delTipoExame', [TipoExameController::class, 'delTipoExame']);
+    Route::post('/getPerfis', [PerfilController::class, 'getPerfis']);
+    Route::post('/getPerfil', [PerfilController::class, 'getPerfil']);
+    Route::post('/setPerfil', [PerfilController::class, 'setPerfil']);
 
-Route::post('/setTipoExameCampo', [TipoExameController::class, 'setTipoExameCampo']);
-Route::post('/delTipoExameCampo', [TipoExameController::class, 'delTipoExameCampo']);
+    Route::post('/getTipoExames', [TipoExameController::class, 'getTipoExames']);
+    Route::post('/getTipoExame', [TipoExameController::class, 'getTipoExame']);
+    Route::post('/setTipoExame', [TipoExameController::class, 'setTipoExame']);
+    Route::post('/delTipoExame', [TipoExameController::class, 'delTipoExame']);
 
-Route::post('/setFicha', [FichaController::class, 'setFicha']);
-Route::post('/getFicha', [FichaController::class, 'getFicha']);
-Route::post('/getFichas', [FichaController::class, 'getFichas']);
+    Route::post('/setTipoExameCampo', [TipoExameController::class, 'setTipoExameCampo']);
+    Route::post('/delTipoExameCampo', [TipoExameController::class, 'delTipoExameCampo']);
 
-Route::post('/getClientes', [ClienteController::class, 'getClientes']);
-Route::post('/getCliente', [ClienteController::class, 'getCliente']);
-Route::post('/setCliente', [ClienteController::class, 'setCliente']);
-Route::post('/getSolicitantes', [ClienteController::class, 'getSolicitantes']);
+    Route::post('/setFicha', [FichaController::class, 'setFicha']);
+    Route::post('/getFicha', [FichaController::class, 'getFicha']);
+    Route::post('/getFichas', [FichaController::class, 'getFichas']);
 
-Route::post('/getMedicos', [MedicoController::class, 'getMedicos']);
-Route::post('/getMedico', [MedicoController::class, 'getMedico']);
-Route::post('/setMedico', [MedicoController::class, 'setMedico']);
-Route::post('/getMedicosCompartilhados', [MedicoController::class, 'getMedicosCompartilhados']);
+    Route::post('/getClientes', [ClienteController::class, 'getClientes']);
+    Route::post('/getCliente', [ClienteController::class, 'getCliente']);
+    Route::post('/setCliente', [ClienteController::class, 'setCliente']);
+    Route::post('/getSolicitantes', [ClienteController::class, 'getSolicitantes']);
+    Route::post('/isClienteSOC', [ClienteController::class, 'isClienteSOC']);
 
-Route::post('/getModelos', [MedicoController::class, 'getModelos']);
-Route::post('/getModelo', [MedicoController::class, 'getModelo']);
-Route::post('/setModelo', [MedicoController::class, 'setModelo']);
+    Route::post('/getMedicos', [MedicoController::class, 'getMedicos']);
+    Route::post('/getMedico', [MedicoController::class, 'getMedico']);
+    Route::post('/setMedico', [MedicoController::class, 'setMedico']);
+    Route::post('/getMedicosCompartilhados', [MedicoController::class, 'getMedicosCompartilhados']);
+    Route::post('/getMedicosPorTipoDeExame', [MedicoController::class, 'getMedicosPorTipoDeExame']);
 
-Route::post('/getMotivoExames', [MotivoExameController::class, 'getMotivoExames']);
-Route::post('/getMotivoExame', [MotivoExameController::class, 'getMotivoExame']);
-Route::post('/setMotivoExame', [MotivoExameController::class, 'setMotivoExame']);
+    Route::post('/getModelos', [MedicoController::class, 'getModelos']);
+    Route::post('/getModelo', [MedicoController::class, 'getModelo']);
+    Route::post('/setModelo', [MedicoController::class, 'setModelo']);
 
-Route::post('/getPaciente', [PacienteController::class, 'getPaciente']);
+    Route::post('/getMotivoExames', [MotivoExameController::class, 'getMotivoExames']);
+    Route::post('/getMotivoExame', [MotivoExameController::class, 'getMotivoExame']);
+    Route::post('/setMotivoExame', [MotivoExameController::class, 'setMotivoExame']);
 
-Route::post('/getMedicoSolicitante', [MedicoSolicitanteController::class, 'getMedico']);
-Route::post('/getMedicosSolicitante', [MedicoSolicitanteController::class, 'getMedicos']);
+    Route::post('/getPaciente', [PacienteController::class, 'getPaciente']);
 
-Route::post('/getProcedimentos', [TipoExameController::class, 'getProcedimentos']);
+    Route::post('/getMedicoSolicitante', [MedicoSolicitanteController::class, 'getMedico']);
+    Route::post('/getMedicosSolicitante', [MedicoSolicitanteController::class, 'getMedicos']);
 
-Route::post('/getServicosFilial', [ServicoController::class, 'getServicosFilial']);
-Route::post('/getServicosCliente', [ServicoController::class, 'getServicosCliente']);
+    Route::post('/getProcedimentos', [TipoExameController::class, 'getProcedimentos']);
 
-Route::post('/getExames', [ExameController::class, 'getExames']);
-Route::post('/getExame', [ExameController::class, 'getExame']);
-Route::post('/setExame', [ExameController::class, 'setExame']);
-Route::post('/lote', [ExameController::class, 'lote']);
-Route::post('/laudo', [ExameController::class, 'laudo']);
-Route::post('/recusa', [ExameController::class, 'recusa']);
-Route::post('/pausar', [ExameController::class, 'pausar']);
-Route::post('/setStatusExame', [ExameController::class, 'setStatusExame']);
-Route::post('/setReciclaExame', [ExameController::class, 'setReciclaExame']);
-Route::post('/getExameParaLaudar', [ExameController::class, 'getExameParaLaudar']);
+    Route::post('/getServicosFilial', [ServicoController::class, 'getServicosFilial']);
+    Route::post('/getServicosCliente', [ServicoController::class, 'getServicosCliente']);
 
-Route::post('/getImpossibilidades', [LaudoController::class, 'getImpossibilidades']);
-Route::post('/getImpossibilidade', [LaudoController::class, 'getImpossibilidade']);
-Route::post('/setImpossibilidade', [LaudoController::class, 'setImpossibilidade']);
+    Route::post('/getExames', [ExameController::class, 'getExames']);
+    Route::post('/getExame', [ExameController::class, 'getExame']);
+    Route::post('/setExame', [ExameController::class, 'setExame']);
+    Route::post('/lote', [ExameController::class, 'lote']);
+    Route::post('/laudo', [ExameController::class, 'laudo']);
+    Route::post('/recusa', [ExameController::class, 'recusa']);
+    Route::post('/pausar', [ExameController::class, 'pausar']);
+    Route::post('/setStatusExame', [ExameController::class, 'setStatusExame']);
+    Route::post('/setReciclaExame', [ExameController::class, 'setReciclaExame']);
+    Route::post('/getExameParaLaudar', [ExameController::class, 'getExameParaLaudar']);
+    Route::post('/atribuirMedico', [ExameController::class, 'atribuirMedico']);
+    Route::post('/retirarPausaMedico', [ExameController::class, 'retirarPausaMedico']);
+    Route::post('/saveLaudoRapido', [ExameController::class, 'saveLaudoRapido']);
+    Route::post('/serverProcessingExameAntigo', [ExameController::class, 'serverProcessingExameAntigo']);
+    
+    Route::post('/enviarExameSOCGED', [ExameSOCController::class, 'enviarExameSOCGED']);
+    Route::post('/getEmpresasSOC', [ExameSOCController::class, 'getEmpresasSOC']);
+    Route::post('/getFuncionariosSOC', [ExameSOCController::class, 'getFuncionariosSOC']);
+    Route::post('/getPedidosExamesFuncionarioSOC', [ExameSOCController::class, 'getPedidosExamesFuncionarioSOC']);
+    Route::post('/vincularSOCSeqResultado', [ExameSOCController::class, 'vincularSOCSeqResultado']);
+    Route::post('/desvincularExameSOC', [ExameSOCController::class, 'desvincularExameSOC']);
+    Route::post('/enviarDadosLaudoSOC', [ExameSOCController::class, 'enviarDadosLaudoSOC']);
 
-Route::post('/setRegraDespacho', [DespachoController::class, 'setRegraDespacho']);
-Route::post('/getRegrasDespacho', [DespachoController::class, 'getRegrasDespacho']);
-Route::post('/getRegraDespacho', [DespachoController::class, 'getRegraDespacho']);
+    Route::post('/getImpossibilidades', [LaudoController::class, 'getImpossibilidades']);
+    Route::post('/getImpossibilidade', [LaudoController::class, 'getImpossibilidade']);
+    Route::post('/setImpossibilidade', [LaudoController::class, 'setImpossibilidade']);
 
-Route::post('/setFilaDespacho', [DespachoController::class, 'setFilaDespacho']);
-Route::post('/getFilaDespacho', [DespachoController::class, 'getFilaDespacho']);
+    Route::post('/setRegraDespacho', [DespachoController::class, 'setRegraDespacho']);
+    Route::post('/getRegrasDespacho', [DespachoController::class, 'getRegrasDespacho']);
+    Route::post('/getRegraDespacho', [DespachoController::class, 'getRegraDespacho']);
+    Route::post('/serverProcessingRegraDespacho', [DespachoController::class, 'serverProcessingRegraDespacho']);
 
-Route::post('/setPrecoCliente', [FinanceiroController::class, 'setPrecoCliente']);
-Route::post('/getPrecoCliente', [FinanceiroController::class, 'getPrecoCliente']);
-Route::post('/getPrecoClientes', [FinanceiroController::class, 'getPrecoClientes']);
+    Route::post('/setFilaDespacho', [DespachoController::class, 'setFilaDespacho']);
+    Route::post('/getFilaDespacho', [DespachoController::class, 'getFilaDespacho']);
 
-Route::post('/setPrecoMedico', [FinanceiroController::class, 'setPrecoMedico']);
-Route::post('/getPrecoMedico', [FinanceiroController::class, 'getPrecoMedico']);
-Route::post('/getPrecoMedicos', [FinanceiroController::class, 'getPrecoMedicos']);
+    Route::post('/setPrecoCliente', [FinanceiroController::class, 'setPrecoCliente']);
+    Route::post('/getPrecoCliente', [FinanceiroController::class, 'getPrecoCliente']);
+    Route::post('/getPrecoClientes', [FinanceiroController::class, 'getPrecoClientes']);
+    Route::post('/serverProcessingPrecoCliente', [FinanceiroController::class, 'serverProcessingPrecoCliente']);
+    Route::get('/serverProcessingPrecoCliente', [FinanceiroController::class, 'serverProcessingPrecoCliente']);
 
-Route::post('/financeiroClientes', [RelatorioController::class, 'financeiroClientes']);
-Route::post('/financeiroMedicos', [RelatorioController::class, 'financeiroMedicos']);
-Route::post('/faturamentoClientes', [RelatorioController::class, 'faturamentoClientes']);
-Route::post('/faturamentoExportar', [RelatorioController::class, 'faturamentoExportar']);
-Route::post('/faturamentoPacotes', [RelatorioController::class, 'faturamentoPacotes']);
-Route::post('/pesquisaAvancada', [RelatorioController::class, 'pesquisaAvancada']);
+    Route::post('/setPrecoMedico', [FinanceiroController::class, 'setPrecoMedico']);
+    Route::post('/getPrecoMedico', [FinanceiroController::class, 'getPrecoMedico']);
+    Route::post('/getPrecoMedicos', [FinanceiroController::class, 'getPrecoMedicos']);
+    Route::post('/serverProcessingPrecoMedico', [FinanceiroController::class, 'serverProcessingPrecoMedico']);
 
-Route::post('/setEquipamento', [EquipamentoController::class, 'setEquipamento']);
-Route::post('/getEquipamento', [EquipamentoController::class, 'getEquipamento']);
-Route::post('/getEquipamentos', [EquipamentoController::class, 'getEquipamentos']);
+    Route::post('/financeiroClientes', [RelatorioController::class, 'financeiroClientes']);
+    Route::post('/financeiroMedicos', [RelatorioController::class, 'financeiroMedicos']);
+    Route::post('/faturamentoClientes', [RelatorioController::class, 'faturamentoClientes']);
+    Route::post('/faturamentoExportar', [RelatorioController::class, 'faturamentoExportar']);
+    Route::post('/faturamentoPacotes', [RelatorioController::class, 'faturamentoPacotes']);
+    Route::post('/faturamentoPacotesTotal', [RelatorioController::class, 'faturamentoPacotesTotal']);
+    Route::post('/pesquisaAvancada', [RelatorioController::class, 'pesquisaAvancada']);
+    Route::post('/pesquisaAvancadaCliente', [RelatorioController::class, 'pesquisaAvancadaCliente']);
+    Route::post('/pesquisaAvancadaMedico', [RelatorioController::class, 'pesquisaAvancadaMedico']);
 
-Route::post('/setConta', [ContaController::class, 'setConta']);
-Route::post('/getConta', [ContaController::class, 'getConta']);
-Route::post('/getContas', [ContaController::class, 'getContas']);
-Route::post('/getSaldo', [ContaController::class, 'getSaldo']);
-Route::post('/trocarSenha', [UsuarioController::class, 'trocarSenha']);
+    Route::post('/setEquipamento', [EquipamentoController::class, 'setEquipamento']);
+    Route::post('/getEquipamento', [EquipamentoController::class, 'getEquipamento']);
+    Route::post('/getEquipamentos', [EquipamentoController::class, 'getEquipamentos']);
+
+    Route::post('/setConta', [ContaController::class, 'setConta']);
+    Route::post('/getConta', [ContaController::class, 'getConta']);
+    Route::post('/getContas', [ContaController::class, 'getContas']);
+    Route::post('/getSaldo', [ContaController::class, 'getSaldo']);
+    Route::post('/trocarSenha', [UsuarioController::class, 'trocarSenha']);
+
+    Route::post('/getRecados', [RecadoController::class, 'getRecados']);
+    Route::post('/setRecados', [RecadoController::class, 'setRecados']);
+    Route::post('/mostraRecados', [RecadoController::class, 'mostraRecados']);
+
+    Route::post('/getPainel', [PainelController::class, 'getPainel']);
+
+    Route::post('/pesquisarOperacoes', [OperacaoController::class, 'pesquisar']);
+    Route::post('/serverProcessingTipoDocumento', [TipoDocumentoController::class, 'serverProcessingTipoDocumento']);
+    Route::post('/setTipoDocumento', [TipoDocumentoController::class, 'setTipoDocumento']);
+    Route::post('/getTipoDocumento', [TipoDocumentoController::class, 'getTipoDocumento']);
+    Route::post('/getTiposDocumentos', [TipoDocumentoController::class, 'getTiposDocumentos']);
+
+    Route::post('/serverProcessingDocumento', [DocumentoController::class, 'serverProcessingDocumento']);
+    Route::post('/setDocumento', [DocumentoController::class, 'setDocumento']);
+    Route::post('/getDocumento', [DocumentoController::class, 'getDocumento']);
+    Route::post('/deleteDocumento', [DocumentoController::class, 'deleteDocumento']);
+    Route::post('/getTempURLDownload', [DocumentoController::class, 'getTempURLDownload']);
+});
 
 Route::get('/retirada', [ExameController::class, 'retirada']);
 
-Route::post('/getRecados', [RecadoController::class, 'getRecados']);
-Route::post('/setRecados', [RecadoController::class, 'setRecados']);
-Route::post('/mostraRecados', [RecadoController::class, 'mostraRecados']);
-
-Route::post('/getPainel', [PainelController::class, 'getPainel']);
-
-Route::get('/log', function(Request $request) {
+Route::get('/log', function (Request $request) {
     $path = storage_path('logs/laravel.log');
     if (!File::exists($path)) {
         abort(404);

@@ -13,4 +13,7 @@ class Empresa extends Model
     public static $BLOQUEADA = 1;
     public static $INATIVA = 2;
 
+    public function isMatriz() {
+        return $this->id == $this->matriz;
+    }
 }

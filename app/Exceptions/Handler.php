@@ -8,8 +8,8 @@ use Throwable;
 class Handler extends ExceptionHandler
 {
 
-    public static $UNAUTHORIZED = 401; // Não autenticado
-    public static $FORBIDDEN    = 403; // Não autorizado
+    public static $UNAUTHORIZED = 401; // Não autorizado
+    public static $FORBIDDEN    = 403; // Sem acesso ao conteudo
     public static $BAD_REQUEST  = 400; // Erro de sintaxe na requisição
 
     public static $EMPRESA_NAO_ENCONTRADA = 'Empresa não encontrada!';
@@ -36,6 +36,7 @@ class Handler extends ExceptionHandler
     public static $TIPO_EXAME_NAO_ENCONTRADO = 'Tipo de exame não encontrado!';
     public static $CAMPO_TIPO_EXAME_NAO_ENCONTRADO = 'Campo tipo de exame não encontrado!';
     public static $CLIENTE_NAO_ENCONTRADO = 'Cliente não encontrado!';
+    public static $CLIENTE_BLOQUEADO = 'Cliente bloqueado!';
     public static $REGISTRO_NAO_ENCONTRADO = 'Registro não encontrado!';
     public static $MEDICO_NAO_ENCONTRADO = 'Médico não encontrado!';
     public static $CHAVE_DE_TRANSMISSAO_NAO_ENCONTRADA = 'Chave de transmissão não encontrada!';
@@ -47,6 +48,7 @@ class Handler extends ExceptionHandler
     public static $MOTIVO_DE_IMPOSSIBILIDADE_NAO_ENCONTRADO = 'Motivo de impossibilidade não encontrado!';
     public static $MODELO_NAO_ENCONTRADO = 'Modelo não encontrado!';
     public static $EXAME_NAO_PODE_SER_PAUSADO = 'Exame não pode ser pausado!';
+    public static $USUARIO_NAO_ADMIN = 'Usuário não tem permissão de administrador!';
     /**
      * A list of the exception types that are not reported.
      *
@@ -74,8 +76,8 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
-        $this->renderable(function (EmpresaNaoEncontradaException $e, $request) {
-            return response(['erro' => Self::$EMPRESA_NAO_ENCONTRADA], Self::$BAD_REQUEST);
+        $this->renderable(function (BloqueioException $e, $request) {
+            return response([ 'erro' => $e->getMessage()], Self::$FORBIDDEN);
         });
 
         $this->renderable(function (EmpresaBloqueadaException $e, $request) {
@@ -84,6 +86,26 @@ class Handler extends ExceptionHandler
 
         $this->renderable(function (EmpresaInativaException $e, $request) {
             return response(['erro' => Self::$EMPRESA_INATIVA], Self::$FORBIDDEN);
+        });
+
+        $this->renderable(function (LoginBloqueadoException $e, $request) {
+            return response(['erro' => Self::$LOGIN_BLOQUEADO], Self::$FORBIDDEN);
+        });
+
+        $this->renderable(function (ClienteBloqueadoException $e, $request) {
+            return response(['erro' => Self::$CLIENTE_BLOQUEADO], Self::$FORBIDDEN);
+        });
+
+        $this->renderable(function (EmpresaNaoEncontradaException $e, $request) {
+            return response(['erro' => Self::$EMPRESA_NAO_ENCONTRADA], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (CodigoDeValidacaoIncorretoException $e, $request) {
+            return response(['erro' => Self::$CODIGO_DE_VALIDACAO_INCORRETO], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (SessaoDeValidacaoExpiradaException $e, $request) {
+            return response(['erro' => Self::$SESSAO_DE_VALIDACAO_EXPIRADA], Self::$BAD_REQUEST);
         });
 
         $this->renderable(function (LoginInvalidoException $e, $request) {
@@ -98,16 +120,8 @@ class Handler extends ExceptionHandler
             return response(['erro' => Self::$DISPOSITIVO_NAO_REGISTRADO], Self::$UNAUTHORIZED);
         });
 
-        $this->renderable(function (LoginBloqueadoException $e, $request) {
-            return response(['erro' => Self::$LOGIN_BLOQUEADO], Self::$FORBIDDEN);
-        });
-
-        $this->renderable(function (CodigoDeValidacaoIncorretoException $e, $request) {
-            return response(['erro' => Self::$CODIGO_DE_VALIDACAO_INCORRETO], Self::$FORBIDDEN);
-        });
-
-        $this->renderable(function (SessaoDeValidacaoExpiradaException $e, $request) {
-            return response(['erro' => Self::$SESSAO_DE_VALIDACAO_EXPIRADA], Self::$FORBIDDEN);
+        $this->renderable(function (AutenticacaoRequeridaException $e, $request) {
+            return response([ 'erro' => Self::$AUTENTICACAO_REQUERIDA], Self::$UNAUTHORIZED);
         });
 
         $this->renderable(function (SessaoNaoEncontradaException $e, $request) {
@@ -127,19 +141,19 @@ class Handler extends ExceptionHandler
         });
 
         $this->renderable(function (ExclusaoNaoPermitidaException $e, $request) {
-            return response([ 'erro' => Self::$EXCLUSAO_NAO_PERMITIDA], Self::$FORBIDDEN);
+            return response([ 'erro' => Self::$EXCLUSAO_NAO_PERMITIDA], Self::$BAD_REQUEST);
         });
 
         $this->renderable(function (BloqueioNaoPermitidoException $e, $request) {
-            return response([ 'erro' => Self::$BLOQUEIO_NAO_PERMITIDO], Self::$FORBIDDEN);
+            return response([ 'erro' => Self::$BLOQUEIO_NAO_PERMITIDO], Self::$BAD_REQUEST);
         });
 
         $this->renderable(function (EmpresaJaCadastradaException $e, $request) {
-            return response([ 'erro' => Self::$EMPRESA_JA_CADASTRADA], Self::$FORBIDDEN);
+            return response([ 'erro' => Self::$EMPRESA_JA_CADASTRADA], Self::$BAD_REQUEST);
         });
 
         $this->renderable(function (CamposObrigatoriosException $e, $request) {
-            return response([ 'erro' => Self::$CAMPOS_OBRIGATORIOS], Self::$FORBIDDEN);
+            return response([ 'erro' => Self::$CAMPOS_OBRIGATORIOS], Self::$BAD_REQUEST);
         });
 
         $this->renderable(function (PerfilNaoEncontradoException $e, $request) {
@@ -156,10 +170,6 @@ class Handler extends ExceptionHandler
 
         $this->renderable(function (CampoTipoExameNaoEncontradoException $e, $request) {
             return response([ 'erro' => Self::$CAMPO_TIPO_EXAME_NAO_ENCONTRADO], Self::$BAD_REQUEST);
-        });
-
-        $this->renderable(function (AutenticacaoRequeridaException $e, $request) {
-            return response([ 'erro' => Self::$AUTENTICACAO_REQUERIDA], Self::$UNAUTHORIZED);
         });
 
         $this->renderable(function (FichaNaoEncontradaException $e, $request) {
@@ -243,6 +253,22 @@ class Handler extends ExceptionHandler
         });
 
         $this->renderable(function (LaudoException $e, $request) {
+            return response([ 'erro' => $e->getMessage()], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (UsuarioNaoAdminException $e, $request) {
+            return response([ 'erro' => Self::$USUARIO_NAO_ADMIN], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (ExameException $e, $request) {
+            return response([ 'erro' => $e->getMessage()], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (UsuarioException $e, $request) {
+            return response([ 'erro' => $e->getMessage()], Self::$BAD_REQUEST);
+        });
+
+        $this->renderable(function (ClienteException $e, $request) {
             return response([ 'erro' => $e->getMessage()], Self::$BAD_REQUEST);
         });
 

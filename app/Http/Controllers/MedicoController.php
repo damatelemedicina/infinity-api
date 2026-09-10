@@ -10,6 +10,7 @@ use App\Exceptions\ModeloNaoEncontradoException;
 use App\Exceptions\UsuarioNaoAssociadoAMedicoException;
 use App\Exceptions\CadastroException;
 use App\Exceptions\AutenticacaoRequeridaException;
+use App\Exceptions\ExameNaoEncontradoException;
 
 use App\Services\Entity\EntityManager;
 use App\Services\Security\PermissionManager;
@@ -17,6 +18,7 @@ use App\Services\Security\CadastroManager;
 
 use Illuminate\Support\Facades\Log;
 
+use App\Models\Exame;
 use App\Models\Medico;
 use App\Models\MedicoExame;
 use App\Models\MedicoModelo;
@@ -41,6 +43,19 @@ class MedicoController extends Controller
         $medico->exames = $medico->exames();
         $medico->modelos = $medico->modelos();
         return $medico;
+    }
+
+    public function getMedicosPorTipoDeExame(Request $request) {
+        $exame = Exame::where('id', $request['body']['exame'])->first();
+        if (!$exame) throw new ExameNaoEncontradoException();
+        $medicos = $this->getMedicosCompartilhados($request);
+        $result = [];
+        foreach ($medicos as $medico) {
+            if ($medico->realizaExame($exame->exame_id)) {
+                $result[] = $medico;
+            }
+        }
+        return $result;
     }
 
     public function getMedicosCompartilhados(Request $request) {
@@ -132,21 +147,21 @@ class MedicoController extends Controller
         $data = $this->doValidate($data);
 
         $bloqueado = filter_var($data['bloqueado'], FILTER_VALIDATE_BOOLEAN);
-
+        $inativo = filter_var($data['inativo'], FILTER_VALIDATE_BOOLEAN);
         $renovar = filter_var($data['renovar'], FILTER_VALIDATE_BOOLEAN);
-
         $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
-
         $medico = is_null($data['id']) ? new Medico() : Medico::where('id', $data['id'])->first();
 
         $medico->nome = $data['nome'];
         $medico->email = $data['email'];
         $medico->situacao = $bloqueado ? Medico::$BLOQUEADO : Medico::$ATIVO;
+        $medico->inativo = $inativo ? Medico::$BLOQUEADO : Medico::$ATIVO;
         $medico->crm = $data['crm'];
         $medico->solicitante = $this->isNullOrEmptyValue($data['solicitante']) ? 0 : $data['solicitante'];
         $medico->empresa_id = $medico->empresa_id ?? $empresa->id;
         $medico->assinatura = $this->isNullOrEmptyValue($upload['assinatura']) ? $medico->assinatura : $upload['assinatura'];
         $medico->assinatura_oit = $this->isNullOrEmptyValue($upload['assinatura-oit']) ? $medico->assinatura_oit : $upload['assinatura-oit'];
+        $medico->fora_despacho = filter_var($data['fora_despacho'], FILTER_VALIDATE_BOOLEAN);
 
         if ($renovar) {
             $medico->certificado = $this->isNullOrEmptyValue($upload['certificado']) ? null : $upload['certificado'];

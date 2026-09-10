@@ -10,6 +10,8 @@ use App\Models\Medico;
 use App\Models\DespachoRegra;
 use App\Models\DespachoFila;
 use App\Models\Exame;
+use App\Models\TipoExame;
+
 use App\ViewModels\ExameViewModel;
 
 use App\Exceptions\MedicoNaoEncontradoException;
@@ -103,6 +105,7 @@ class DespachoController extends Controller
         if ($usuario->conta_medico == Self::$MEDICO_NAO_DEFINIDO) throw new UsuarioNaoAssociadoAMedicoException();
         $medico = Medico::where('id', $usuario->conta_medico)->first();
         if (!$medico) throw new MedicoNaoEncontradoException();
+        if ($medico->fora_despacho) throw new DespachoException("Não há exames para laudar!");
 
         $exames = Exame::where([
             'medico_id' => $medico->id,
@@ -118,26 +121,31 @@ class DespachoController extends Controller
          ])->first();
          if ($fila) throw new DespachoException("Em breve seu exame estará disponível!");
 
-        $examesERecusas = $this->getTiposDeExamesERecusas($medico);
+        $examesRecusasETempo = $this->getTiposDeExamesRecusasETempo($medico);
 
         $fila = new DespachoFila();
         $fila->empresa_id = $empresa->id;
         $fila->medico_id = $medico->id;
-        $fila->exames =  $examesERecusas['exames'];
-        $fila->recusas = $examesERecusas['recusas'];
+        $fila->exames =  $examesRecusasETempo['exames'];
+        $fila->recusas = $examesRecusasETempo['recusas'];
+        $fila->tempo = json_encode($examesRecusasETempo['tempo']);
         $fila->status = Self::$FILA_AGUARDANDO;
         $fila->save();
 
         return ['id' => $fila->id];
     }
 
-    private function getTiposDeExamesERecusas($medico) {
+    private function getTiposDeExamesRecusasETempo($medico) {
         $exames = $medico->exames();
         if (!$exames) throw new DespachoException("Nenhum tipo de exame definido!");
-        $result = array('exames' => '', 'recusas' => '');
+        $result = array('exames' => '', 'recusas' => '', 'tempo' => array());
         foreach($exames as $exame) {
             $result['exames'] .= $exame->tipo_exame_id . ',';
             $result['recusas'] .= $exame->recusa ? ($exame->tipo_exame_id . ',') : '';
+            $result['tempo'][] = array(
+                'e' => $exame->tipo_exame_id,
+                't' => is_null($exame->tempo) ? 0 : $exame->tempo
+            );
         }
         $result['exames'] = rtrim($result['exames'], ",");
         $result['recusas'] = rtrim($result['recusas'], ",");
@@ -159,4 +167,9 @@ class DespachoController extends Controller
         return [];
     }
 
+    public function serverProcessingRegraDespacho(Request $request) {
+        $this->validarRequisicao($request, Self::$BODY_REQUIRED);
+        $empresa = $this->getEmpresaByLogin($this->getEmpresaDoDominio($request));
+        return DespachoRegra::serverProcessing($empresa->id);
+    }
 }

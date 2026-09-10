@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\JsonModel\ClienteJson;
+use App\Models\JsonModel\JsonToClass;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -11,7 +13,12 @@ class Cliente extends Model
 
     public static $ATIVO = 0;
     public static $BLOQUEADO = 1;
+    public static $INATIVO = 1;
     public static $MARCADO = 1;
+
+    protected $casts = [
+        'json' => JsonToClass::class . ':' . ClienteJson::class,
+    ];
 
     public function servicos() {
         $result = [];

@@ -12,6 +12,7 @@ class FinanceiroClienteExport extends BaseExport implements FromView
 
     function __construct($laudos)
     {
+        $this->lastRow = count((array) $laudos);
         Self::$LAUDOS = $this->toObject($laudos);
     }
 

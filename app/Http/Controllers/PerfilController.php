@@ -38,6 +38,7 @@ class PerfilController extends Controller
             'PerfilMaster' => $perfil->master,
             'PerfilCliente' => $perfil->cliente,
             'PerfilMedico' => $perfil->medico,
+            'PerfilMaster' => $perfil->master,
             'PerfilEmpresaId' => $perfil->empresa_id,
             'PerfilPermissoes' => PerfilViewModel::getPermissoes($perfil),
         );
@@ -59,7 +60,7 @@ class PerfilController extends Controller
         $perfil->nome = $data['PerfilNome'];
         $perfil->cliente = $data['PerfilCliente'];
         $perfil->medico = $data['PerfilMedico'];
-
+        $perfil->master = $data['PerfilMaster'];
         $perfil->save();
 
         $permissoes = $data['PerfilPermissoes'];

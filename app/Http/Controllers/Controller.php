@@ -18,10 +18,15 @@ use App\Exceptions\EmpresaInativaException;
 use App\Exceptions\FichaNaoEncontradaException;
 use App\Exceptions\UsuarioNaoEncontradoException;
 use App\Exceptions\ClienteNaoEncontradoException;
+use App\Exceptions\ExameNaoEncontradoException;
+use App\Exceptions\BloqueioException;
 
 use App\Exceptions\AutenticacaoRequeridaException;
 use App\Exceptions\LoginInvalidoException;
 use App\Exceptions\LoginBloqueadoException;
+
+use App\Exceptions\UsuarioException;
+use App\Exceptions\ClienteException;
 
 use App\Models\Empresa;
 use App\Models\Ficha;
@@ -32,6 +37,8 @@ use App\Models\FichaProcedimento;
 use App\Models\MotivoExame;
 use App\Models\Cliente;
 use App\Models\Exame;
+use App\Models\Operacao;
+use App\Models\Medico;
 
 class Controller extends BaseController
 {
@@ -56,6 +63,7 @@ class Controller extends BaseController
     protected static $PATH_ASSETS = '/uploads/assets/';
 
     private static $REQUEST;
+
 
     protected function getMatriz(Request $request) {
         $login = $this->getEmpresaDoDominio($request);
@@ -153,6 +161,14 @@ class Controller extends BaseController
         if (!isset($request['session'])) throw new AutenticacaoRequeridaException();
         $request['session'] = json_decode($request['session'], true);
         return $request;
+    }
+
+    protected function getUsuariosDoCliente(Request $request) {
+        $usuario = Usuario::where('login', $request['session']['login'])->first();
+        if (!$usuario) throw new LoginInvalidoException();
+        if ($usuario->situacao == Usuario::$BLOQUEADO) throw new LoginBloqueadoException();
+        if ($usuario->restringir_exames) return [ $usuario ];
+        return Usuario::where('conta_cliente', $usuario->conta_cliente)->get();
     }
 
     protected function getUsuarioLogado(Request $request)
@@ -271,6 +287,15 @@ class Controller extends BaseController
         return $ano . '-' . $mes . '-' . $dia;
     }
 
+    protected function toDataIntervalo($interval = 30) {
+        $inicial = date('d/m/YY', strtotime("-7 days"));
+        $final = date('d/m/YY', strtotime("+{$interval} days"));
+        return array(
+            'inicial' => $this->toDataInicial($inicial),
+            'final' => $this->toDataFinal($final)
+        );
+    }
+
     protected function toDataFinal($data) {
         return $this->toData($data) . ' 23:59:59';
     }
@@ -373,32 +398,21 @@ class Controller extends BaseController
     protected function getEmpresaDoDominio($request)
     {
         if (!isset($request['origin'])) throw new RequisicaoMalFormadaException();
-
-        //$login = 'DAMA';
-
-        //if (\App::environment(['prod'])) {
-
-            preg_match(
-                '/http[s]?:\/\/([a-z]*).*/',
-                $request['origin'],
-                $matches
-            );
-
-            if (count($matches) < 2) {
-                throw new EmpresaNaoEncontradaException();
-            }
-
-            $login = strtoupper($matches[1]);
-
-        //}
-
+        preg_match(
+            '/http[s]?:\/\/([a-z]*).*/',
+            $request['origin'],
+            $matches
+        );
+        if (count($matches) < 2) {
+            throw new EmpresaNaoEncontradaException();
+        }
+        $login = strtoupper($matches[1]);
         $empresa = Empresa::where('login', $login)->first();
         if (!$empresa) throw new EmpresaNaoEncontradaException();
         if ($empresa->situacao == Empresa::$BLOQUEADA) throw new EmpresaBloqueadaException();
         if ($empresa->situacao == Empresa::$INATIVA) throw new EmpresaInativaException();
 
         return $login;
-
     }
 
     protected function getQuery(Request $request, $id) {
@@ -413,12 +427,44 @@ class Controller extends BaseController
         );
     }
 
+    private function validaBloqueioMedico($usuario) {
+        if ($usuario->conta_medico == 0) return;
+        $medico = Medico::where('id', $usuario->conta_medico)->first();
+        if (!$medico) throw new BloqueioException('Médico não encontrado!');
+        if ($medico->situacao == Medico::$BLOQUEADO) throw new BloqueioException('Médico bloqueado!');
+        if ($medico->inativo == Medico::$INATIVO) throw new BloqueioException('Médico inativo!');
+    }
+
+    private function validaBloqueioCliente($usuario) {
+        if ($usuario->conta_cliente == 0) return;
+        $cliente = Cliente::where('id', $usuario->conta_cliente)->first();
+        if (!$cliente) throw new BloqueioException('Cliente não encontrado!');
+        if ($cliente->situacao == Cliente::$BLOQUEADO) throw new BloqueioException('Cliente bloqueado X!');
+        if ($cliente->inativo == Cliente::$INATIVO) throw new BloqueioException('Cliente inativo X!');
+    }
+
+    protected function validaBloqueios($request, $sessionRequired) {
+        $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
+        if (!$empresa) throw new BloqueioException('Empresa não encontrada!');
+        if ($empresa->situacao == Empresa::$BLOQUEADA) throw new BloqueioException('Empresa bloqueada!');
+        if ($empresa->situacao == Empresa::$INATIVA) throw new BloqueioException('Empresa inativa!');
+        if ($sessionRequired) {
+            $usuario = Usuario::where('login', $request['session']['login'])->first();
+            if (!$usuario) throw new BloqueioException('Usuário não encontrado!');
+            if ($usuario->situacao == Usuario::$BLOQUEADO) throw new BloqueioException('Login bloqueado!');
+            if ($usuario->inativo == Usuario::$INATIVO) throw new BloqueioException('Login inativo!');
+            $this->validaBloqueioCliente($usuario);
+            $this->validaBloqueioMedico($usuario);
+        }
+    }
+
     protected function validarRequisicao($request, $bodyRequired = false, $sessionRequired = true)
     {
         if (!isset($request['origin'])) throw new RequisicaoMalFormadaException();
         if ($sessionRequired && !isset($request['session'])) throw new AutenticacaoRequeridaException();
         $request['session'] = is_string($request['session']) ? json_decode($request['session'], true) : $request['session'];
         if ($sessionRequired && !isset($request['session']['login'])) throw new AutenticacaoRequeridaException();
+        $this->validaBloqueios($request, $sessionRequired);
         if ($bodyRequired && !isset($request['body'])) throw new RequisicaoMalFormadaException();
     }
 
@@ -448,4 +494,52 @@ class Controller extends BaseController
 
     }
 
+    protected function getUsuarioSistema() {
+        $usuario = Usuario::where('sistema', '1')->first();
+        if (!$usuario) throw new UsuarioException('Nenhum usuário do sistema registrado!');
+        return $usuario;
+    }
+
+    protected function getClienteSistema() {
+        $cliente = Cliente::where('sistema', '1')->first();
+        if (!$cliente) throw new ClienteException('Nenhum cliente do sistema registrado!');
+        return $cliente;
+    }
+
+    protected function registraAlerta($descricao) {
+        $usuario = $this->getUsuarioSistema();
+        $cliente = $this->getClienteSistema();
+        $empresa = Empresa::whereRaw("id = matriz")->first();
+        if (!$empresa) throw new EmpresaNaoEncontradaException();
+        $operacao = new Operacao();
+        $operacao->empresa_id = $empresa->id;
+        $operacao->usuario_id = $usuario->id;
+        $operacao->cliente_id = $cliente->id;
+        $operacao->operacao = $descricao;
+        $operacao->save();
+    }
+
+    protected function registraOperacao(Request $request, $exame, $descricao) {
+        $usuario = $this->getUsuarioLogado($request);
+        if (!$usuario) throw new UsuarioNaoEncontradoException();
+        if (!$exame) throw new ExameNaoEncontradoException();
+        $operacao = new Operacao();
+        $operacao->exame_id = $exame->id;
+        $operacao->empresa_id = $exame->empresa_id;
+        $operacao->cliente_id = $exame->cliente_id;
+        $operacao->usuario_id = $usuario->id;
+        $operacao->medico_id = $exame->medico_id;
+        $operacao->operacao = $descricao;
+        $operacao->save();
+    }
+
+    protected function isValidDate($date, $format = 'd/m/Y') {
+        try {
+            $dateTime = \DateTime::createFromFormat($format, $date);
+            return $dateTime && $dateTime->format($format) === $date;
+        } catch (\Throwable $th) {
+            // throw $th;
+        }
+        return false;
+    }
 }

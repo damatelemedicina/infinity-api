@@ -11,7 +11,11 @@ use App\Exceptions\LoginInvalidoException;
 use App\Exceptions\LoginBloqueadoException;
 use App\Exceptions\SenhaInvalidaException;
 use App\Exceptions\CodigoDeValidacaoIncorretoException;
+use App\Exceptions\ClienteBloqueadoException;
+use App\Exceptions\BloqueioException;
 
+
+use App\Models\Cliente;
 use App\Models\Usuario;
 use App\Models\Perfil;
 use App\Models\Acesso;
@@ -32,11 +36,16 @@ class LoginViewModel extends BaseViewModel
             new LoginInvalidoException(),
             Self::$ARRAY_EXTRACT_ONE
         );
-
         if ($rs['UsuarioSituacao'] == Usuario::$BLOQUEADO) throw new LoginBloqueadoException();
+        if ($rs['UsuarioInativo'] == Usuario::$INATIVO) throw new BloqueioException('Login inativo!');
         if ($senha == null) return $rs;
         if (!Hash::check($senha, $rs['UsuarioSenha'])) throw new SenhaInvalidaException();
-
+        $usuario = Usuario::where('id', $rs['UsuarioId'])->first();
+        $cliente = $usuario->cliente();
+        if ($cliente) {
+            if ($cliente->situacao == Cliente::$BLOQUEADO) throw new ClienteBloqueadoException();
+            if ($cliente->inativo == Cliente::$INATIVO) throw new BloqueioException('Cliente inativo!');
+        }
         return $rs;
 
     }
