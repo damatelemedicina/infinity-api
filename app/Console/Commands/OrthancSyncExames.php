@@ -10,17 +10,23 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Runs a single poll cycle against Orthanc's /changes feed and imports any
- * new DICOM instance into the exames table. Meant to be invoked repeatedly
- * by an external loop (see infinity/docker/docker-compose.yml, service
- * "orthanc-sync") — this command itself does not loop or sleep, which keeps
- * it simple to run and test in isolation.
+ * Roda um único ciclo de consulta no feed /changes do Orthanc e importa cada
+ * estudo estável pra tabela exames. Feito pra ser chamado repetidamente por um
+ * loop externo (ver infinity/docker/docker-compose.yml, serviço
+ * "orthanc-sync") — o comando em si não fica em loop nem dorme, o que
+ * mantém ele simples de rodar e testar isoladamente.
+ *
+ * Reage a "StableStudy" em vez de "NewInstance": o Orthanc só dispara
+ * StableStudy quando um estudo para de receber instâncias novas, que é o
+ * momento certo pra agrupar o estudo inteiro por tipo (StudyInstanceUID +
+ * tipoExame) e criar um exame por grupo — igual um upload de zip de lote faz
+ * — em vez de criar um exame por instância conforme elas vão chegando.
  */
 class OrthancSyncExames extends Command
 {
     protected $signature = 'orthanc:sync-exames {--limit=50 : Max Orthanc changes to fetch per cycle}';
 
-    protected $description = 'Poll Orthanc for new DICOM instances since the last cursor and import them as exames';
+    protected $description = 'Poll Orthanc for stable studies since the last cursor and import them as exames, grouped by type';
 
     public function handle(OrthancClient $client, OrthancExameImporter $importer): int
     {
@@ -44,19 +50,18 @@ class OrthancSyncExames extends Command
             $changes = $result['Changes'] ?? [];
 
             foreach ($changes as $change) {
-                if (($change['ChangeType'] ?? null) !== 'NewInstance') {
+                if (($change['ChangeType'] ?? null) !== 'StableStudy') {
                     continue;
                 }
 
-                $instanceId = $change['ID'];
+                $studyId = $change['ID'];
 
                 try {
-                    $bytes = $client->downloadInstanceFile($instanceId);
-                    $created = $importer->importInstance($bytes, $instanceId);
+                    $created = $importer->importStudy($client, $studyId);
                     $created ? $imported++ : $skipped++;
                 } catch (Throwable $e) {
                     $failed++;
-                    Log::error("OrthancSync: falha ao importar instância {$instanceId}: " . $e->getMessage(), [
+                    Log::error("OrthancSync: falha ao importar estudo {$studyId}: " . $e->getMessage(), [
                         'exception' => $e,
                     ]);
                 }

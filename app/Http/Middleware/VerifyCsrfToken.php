@@ -12,6 +12,9 @@ class VerifyCsrfToken extends Middleware
      * @var array
      */
     protected $except = [
-        //
+        // Proxy pro Orthanc (routes/web.php): o Stone Web Viewer faz POST
+        // (ex: /tools/find) sem nenhum token CSRF nosso — ele nem sabe que
+        // está passando por um proxy Laravel.
+        'orthanc-viewer/*',
     ];
 }

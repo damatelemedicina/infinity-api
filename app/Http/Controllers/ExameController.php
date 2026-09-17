@@ -296,7 +296,73 @@ class ExameController extends Controller
         $exame->mensagem_medicos = $cliente->mensagem_medicos;
         $exame->imc = $this->getIMC($exame->peso, $exame->altura);
         $exame = $this->getEnviadoDigitado($exame);
+        // orthanc_viewer_series_ids vai completo pro front — o Stone Web Viewer
+        // não carrega mais de uma série pela URL (o "series=" com vírgula só
+        // pega a primeira, na prática), então o front usa a lista pra chamar
+        // stone.FetchSeries() a mais, uma vez pra cada série adicional, depois
+        // que o iframe inicializa. Ver @page-script.js (tela de exame).
+        $exame->orthanc_viewer_series_ids = $this->getOrthancSeriesIdsDoGrupoAnatomico($exame);
+        $exame->orthanc_viewer_url = $this->getOrthancViewerUrl($exame, $exame->orthanc_viewer_series_ids);
         return $exame;
+    }
+
+    /**
+     * Junta a série do próprio exame com a de todo "irmão" que seja: mesmo
+     * estudo Orthanc (orthanc_study_id) + mesma parte do corpo (ver
+     * normalizeParteCorpoExaminada) — ex: "MAO DIR" e "MAO ESQ" viram grupos
+     * separados no agrupamento por tipoExame (ver getDICOMInfo), mas os dois
+     * têm parte_corpo_examinada = "MAO", então abrindo qualquer um dos dois no
+     * viewer as duas séries entram juntas. Devolve só os SeriesInstanceUID
+     * únicos, sempre incluindo o do próprio exame mesmo se ele não tiver
+     * parte_corpo_examinada preenchida (equipamento que não manda essa tag).
+     */
+    private function getOrthancSeriesIdsDoGrupoAnatomico($exame) {
+        $seriesIds = array();
+        if (!empty($exame->orthanc_series_id)) $seriesIds[] = $exame->orthanc_series_id;
+
+        if (!empty($exame->orthanc_study_id) && !empty($exame->parte_corpo_examinada)) {
+            $irmaos = Exame::where('orthanc_study_id', $exame->orthanc_study_id)
+                ->where('parte_corpo_examinada', $exame->parte_corpo_examinada)
+                ->whereNotNull('orthanc_series_id')
+                ->pluck('orthanc_series_id');
+            foreach ($irmaos as $seriesId) {
+                if (!in_array($seriesId, $seriesIds)) $seriesIds[] = $seriesId;
+            }
+        }
+
+        return $seriesIds;
+    }
+
+    // Monta o link do Stone Web Viewer (só existe pra exames que vieram do
+    // sincronismo do Orthanc — ver OrthancExameImporter::importStudy() e as
+    // colunas exames.orthanc_study_id/orthanc_series_id, que apesar do nome
+    // guardam o StudyInstanceUID/SeriesInstanceUID do DICOM, não os IDs
+    // internos do Orthanc — é o que os parâmetros "study="/"series=" do
+    // viewer esperam, já que ele busca os dados via DICOMweb.
+    //
+    // "series=" na URL só é respeitado pelo viewer pra UMA série — testado na
+    // prática: passar vários UIDs separados por vírgula carrega só o
+    // primeiro. Por isso a URL aqui carrega só a primeira série (a do próprio
+    // exame), e as demais (ver getOrthancSeriesIdsDoGrupoAnatomico, ex:
+    // "MAO ESQ" quando esse exame é "MAO DIR") são somadas pelo front chamando
+    // stone.FetchSeries() direto no iframe depois que o viewer inicializa —
+    // ver $exame->orthanc_viewer_series_ids acima e @page-script.js.
+    //
+    // Sem nenhuma série resolvida (dado antigo, importado antes dessas
+    // colunas existirem), cai pro estudo inteiro — pior (mistura tudo) mas
+    // ainda funciona.
+    //
+    // Devolve um caminho RELATIVO à própria API ("/orthanc-viewer/..."), não
+    // a URL do Orthanc direto: o Orthanc exige login em toda requisição (até
+    // pra carregar a página do viewer), e o navegador do usuário não tem essa
+    // credencial. A rota "/orthanc-viewer/{path}" (routes/web.php) é quem
+    // repassa pro Orthanc real com o usuário/senha injetados no servidor.
+    private function getOrthancViewerUrl($exame, $seriesIds) {
+        $orthancStudyId = $exame->orthanc_study_id;
+        if (empty($orthancStudyId)) return null;
+        $url = '/orthanc-viewer/stone-webviewer/index.html?study=' . $orthancStudyId;
+        if (!empty($seriesIds)) $url .= '&series=' . $seriesIds[0];
+        return $url;
     }
 
     private function getEnviadoDigitado($exame) {
@@ -1769,6 +1835,27 @@ class ExameController extends Controller
         );
     }
 
+    /**
+     * "Envio de lote": ponto de entrada chamado pela tela de upload do site
+     * (um cliente logado escolhe um ou mais arquivos/zips de uma vez). É esse
+     * endpoint que todos os outros comentários desta seção (insertZip,
+     * addDCMFileInList, processDCMGroups...) levam em conta.
+     *
+     * Para cada arquivo enviado:
+     *  - "dama_imagens.zip" é um caso especial tratado por insertIMAGENS()
+     *    (anexo de imagens pra um exame que já existe, não um exame novo) e
+     *    encerra o loop.
+     *  - um .zip vai direto pro insertZip() (abaixo), que faz o trabalho de
+     *    verdade: extrair, descobrir o tipo de cada arquivo, agrupar as
+     *    imagens DICOM por tipo, criar os exames.
+     *  - arquivos soltos (fora de zip) são acumulados em $file_upload_list e,
+     *    no fim do loop, juntados num único zip (doZipFiles) pra passar pelo
+     *    mesmo caminho do insertZip() que um upload de zip passaria.
+     *
+     * $key ("chave_transmissao") identifica de qual Cliente são os arquivos —
+     * ela viaja por insertZip/insertDCM/insertExameDCM como $dama_desktop_key,
+     * mesmo fora do canal do aplicativo desktop que dá nome à variável.
+     */
     function lote(Request $request) {
 
         $request = $this->parseRequest($request);
@@ -1885,6 +1972,30 @@ class ExameController extends Controller
         return $clienteId == null ? $hashId : $clienteId;
     }
 
+    /**
+     * Transforma um zip enviado em exames. $dama_desktop_key é a
+     * chave_transmissao do Cliente (ou Self::$ORTHANC no fluxo de sincronismo
+     * do Orthanc, que pula a checagem "Cliente precisa existir" abaixo porque
+     * esse fluxo resolve o próprio Cliente separadamente, via Institution Name
+     * — ver OrthancExameImporter).
+     *
+     * Dois tipos bem diferentes de arquivo são tratados aqui, em duas etapas:
+     *
+     *  1. Arquivos não-DICOM (xml, wxml, datest, dat, eeg, pdf, txt...):
+     *     agrupados pelo nome base do arquivo via
+     *     addFileInList()/setFileTarget()/setImagemTarget() (assim
+     *     "exame123.xml" + "exame123.jpg" viram um grupo só), e cada grupo é
+     *     roteado pro insertXXX() correspondente (insertXML, insertWXML,
+     *     insertDATEST...) de acordo com a extensão "target" do grupo. Um
+     *     exame por grupo — esse loop está logo abaixo.
+     *
+     *  2. Arquivos DICOM (.dcm/.oit): NÃO fazem parte dos grupos acima
+     *     (addFileInList pula eles de propósito) — são agrupados separadamente,
+     *     por tipo clínico em vez de nome de arquivo, via
+     *     addDCMFileInList()/processDCMGroups() no fim desta função. Ver
+     *     getDICOMInfo() pra entender o que significa "mesmo tipo"
+     *     (StudyInstanceUID + nome do exame normalizado a partir das tags DICOM).
+     */
     private function insertZip($data, $dama_desktop_key = null) {
 
         if ($dama_desktop_key == null) throw new ChaveDeTransmissaoNaoEncontradaException();
@@ -2017,40 +2128,7 @@ class ExameController extends Controller
                 );
             }
 
-            foreach ($dcm_files as $key => $obj) {
-                $clinica_id = $this->getClinicaIdDoDCM($obj, $dama_desktop_key);
-                if (!$clinica_id) continue;
-
-                if ($this->isSingleDCMInserted($obj, $clinica_id, $CLIENTE_ID, $path_dcm, $dama_desktop_key)) {
-                    continue;
-                }
-
-                $dcm_count = count($obj['files']);
-
-                if ($this->createDCMZip($obj, $path_dcm)) {
-					$observacao = '';
-					foreach($obj['exames'] as $e) {
-						$observacao .= trim($e) . ' + ';
-					}
-                    $observacao = $obj['subtipo'] . ' - ' . $observacao;
-					$params = array(
-						'OIT' => $obj['OIT'],
-						'imagem' => Self::$PATH_LOTES.'dcm/' . $obj['zip_name'] . '{{' . $dcm_count . '}}.jpg',
-						'clinica_id' => $clinica_id,
-						'observacao' => substr($observacao, 0, strlen($observacao)-3),
-						'subtipo' => $obj['subtipo'],
-                        'medico' => $obj['medico'],
-                        'empresa' => $obj['empresa'],
-                        'recepcionado' => $CLIENTE_ID
-					);
-					$this->insertExameDCM(
-						$path_dcm.$obj['files'][0],
-						Self::$PATH_LOTES.'dcm/'.$obj['zip_name'].'.zip',
-						$dama_desktop_key,
-						$params
-					);
-				}
-			}
+            $this->processDCMGroups($dcm_files, $path_dcm, $CLIENTE_ID, $dama_desktop_key);
 
             $zip->close();
 
@@ -2058,7 +2136,63 @@ class ExameController extends Controller
 
     }
 
-    private function isSingleDCMInserted($obj, $clinica_id, $CLIENTE_ID, $path_dcm, $dama_desktop_key) {
+    /**
+     * Pega as instâncias DICOM já agrupadas por tipo (StudyInstanceUID +
+     * tipoExame, ver getDICOMInfo()) e transforma cada grupo em um exame — um
+     * grupo com uma instância só é inserido direto, um grupo com várias antes
+     * é zipado. Compartilhado pelo fluxo de zip do "envio de lote" (insertZip,
+     * acima) e pelo fluxo de sincronismo do Orthanc
+     * (OrthancExameImporter::importStudy), que monta o $dcm_files via
+     * addDCMBytesInList() em vez de extrair de um zip.
+     */
+    protected function processDCMGroups($dcm_files, $path_dcm, $CLIENTE_ID, $dama_desktop_key, $orthanc_study_id = null) {
+        foreach ($dcm_files as $key => $obj) {
+            $clinica_id = $this->getClinicaIdDoDCM($obj, $dama_desktop_key);
+            if (!$clinica_id) continue;
+
+            if ($this->isSingleDCMInserted($obj, $clinica_id, $CLIENTE_ID, $path_dcm, $dama_desktop_key, $orthanc_study_id)) {
+                continue;
+            }
+
+            $dcm_count = count($obj['files']);
+
+            if ($this->createDCMZip($obj, $path_dcm)) {
+				$observacao = '';
+				foreach($obj['exames'] as $e) {
+					$observacao .= trim($e) . ' + ';
+				}
+                $observacao = $obj['subtipo'] . ' - ' . $observacao;
+				$params = array(
+					'OIT' => $obj['OIT'],
+					'imagem' => Self::$PATH_LOTES.'dcm/' . $obj['zip_name'] . '{{' . $dcm_count . '}}.jpg',
+					'clinica_id' => $clinica_id,
+					'observacao' => substr($observacao, 0, strlen($observacao)-3),
+					'subtipo' => $obj['subtipo'],
+                    'medico' => $obj['medico'],
+                    'empresa' => $obj['empresa'],
+                    'recepcionado' => $CLIENTE_ID,
+                    'orthanc_study_id' => $orthanc_study_id,
+                    'orthanc_series_id' => $obj['series_uid'] ?? null,
+                    'parte_corpo_examinada' => $obj['parte_corpo_examinada'] ?? null
+				);
+				$this->insertExameDCM(
+					$path_dcm.$obj['files'][0],
+					Self::$PATH_LOTES.'dcm/'.$obj['zip_name'].'.zip',
+					$dama_desktop_key,
+					$params
+				);
+			}
+		}
+    }
+
+    /**
+     * Atalho pra quando um grupo (ver processDCMGroups) tem uma única
+     * instância DICOM: nesse caso não vale a pena zipar (createDCMZip), insere
+     * o .dcm direto e devolve true — processDCMGroups() então pula o resto do
+     * processamento desse grupo (que é pra grupos com mais de um arquivo).
+     * Devolve false sem fazer nada quando o grupo tem mais de uma instância.
+     */
+    private function isSingleDCMInserted($obj, $clinica_id, $CLIENTE_ID, $path_dcm, $dama_desktop_key, $orthanc_study_id = null) {
         $count = count($obj['files']);
         if ($count > 1) return false;
         $observacao = '';
@@ -2074,7 +2208,10 @@ class ExameController extends Controller
             'subtipo' => $obj['subtipo'],
             'medico' => $obj['medico'],
             'empresa' => $obj['empresa'],
-            'recepcionado' => $CLIENTE_ID
+            'recepcionado' => $CLIENTE_ID,
+            'orthanc_study_id' => $orthanc_study_id,
+            'orthanc_series_id' => $obj['series_uid'] ?? null,
+            'parte_corpo_examinada' => $obj['parte_corpo_examinada'] ?? null
         );
         $this->insertExameDCM(
             $path_dcm.$obj['files'][0],
@@ -2113,6 +2250,18 @@ class ExameController extends Controller
 
     }
 
+    /**
+     * Agrupa os arquivos do zip pelo nome base (tudo antes da extensão, ou
+     * antes da primeira "/" se o arquivo estiver numa subpasta) — ex:
+     * "exame1.xml", "exame1.ex0" e "exame1.fas" caem todos no mesmo grupo
+     * "exame1". Arquivos DICOM (.dcm/.oit) são propositalmente ignorados aqui:
+     * eles não pertencem a um grupo por nome de arquivo, têm seu próprio
+     * agrupamento por tipo via addDCMFileInList()/groupDCMFile().
+     *
+     * Cada grupo fica com essa cara:
+     *   ['name' => 'exame1', 'target' => null (preenchido depois por setFileTarget),
+     *    'raw_name' => crc32('exame1'), 'files' => ['exame1.xml', 'exame1.ex0', ...]]
+     */
     private function addFileInList($files_in_zip, $name){
 
         $len = strpos($name, '/');
@@ -2138,6 +2287,12 @@ class ExameController extends Controller
 
     }
 
+    // $TARGET / $HIGH_PRIORITY (constantes da classe lá no topo do arquivo)
+    // listam as extensões que podem carregar o dado real do exame (wxml, xml,
+    // datest, dte, dat, plg, tep, eeg, pdf, txt, dcm, oit). isTarget() checa se
+    // um arquivo é um desses; isHighPriority() checa o subconjunto (xml,
+    // datest, dte) que deve prevalecer sobre os outros quando o grupo tem mais
+    // de um candidato.
     private function isTarget($name){
         return preg_match(self::$TARGET, $name) == 1;
     }
@@ -2146,6 +2301,13 @@ class ExameController extends Controller
         return preg_match(self::$HIGH_PRIORITY, $name) == 1;
     }
 
+    /**
+     * Escolhe qual arquivo do grupo é "o" arquivo que decide qual insertXXX()
+     * (insertXML, insertWXML, insertDATEST...) vai ser chamado pro grupo
+     * inteiro — ver o dispatch por extensão em doInsert(), mais abaixo. Continua
+     * varrendo mesmo depois de achar um target, caso apareça depois uma
+     * extensão de prioridade mais alta (isHighPriority) que deva assumir o lugar.
+     */
     private function getFileTarget($files){
         $target = null;
         for ($i = 0; $i < count($files); $i++) {
@@ -2167,6 +2329,9 @@ class ExameController extends Controller
         return $match;
     }
 
+    // Acha a imagem de preview/miniatura (jpg/png/etc) dentro de um grupo, se
+    // houver — separado do arquivo de dado "target" acima. Um grupo pode ter
+    // os dois, ex: "exame1.xml" (o dado, vira o target) + "exame1.jpg" (a imagem).
     private function getImagemTarget($files){
         for ($i = 0; $i < count($files); $i++) {
             if ($this->isImageFile($files[$i])) return $files[$i];
@@ -2174,6 +2339,8 @@ class ExameController extends Controller
         return null;
     }
 
+    // Roda getFileTarget()/getImagemTarget() em cima de cada grupo produzido
+    // por addFileInList(), preenchendo os campos 'target' / 'image' de cada um.
     private function setFileTarget($files){
         for ($i = 0; $i < count($files); $i++) {
             $files[$i]['target'] = $this->getFileTarget($files[$i]['files']);
@@ -2188,6 +2355,10 @@ class ExameController extends Controller
         return $files;
     }
 
+    // Alguns softwares de exame antigos usam "#" como separador no nome do
+    // arquivo, o que quebra o tratamento de arquivo mais adiante — isso troca
+    // por "_" no disco e nos registros do grupo ('name', 'target', cada item
+    // de 'files') pra manter tudo consistente.
     private function renameFile($files_in_zip, $path, $i, $raw_name){
 
 		$name = str_replace("#", "_", $files_in_zip[$i]['name']);
@@ -2208,6 +2379,14 @@ class ExameController extends Controller
 
     }
 
+	/**
+	 * Um grupo cujo target é .xml/.txt é um exame de espirometria e só é
+	 * considerado completo se vier com os dois arquivos complementares .ex0 e
+	 * .fas (formatos de dado bruto do espirômetro) — caso contrário o dado do
+	 * exame está incompleto e o grupo é descartado (o chamador em insertZip
+	 * simplesmente pula ele). Qualquer outra extensão de target é aceita
+	 * direto, sem essa checagem.
+	 */
 	private function isFilesGroupIsValid($files){
 		$target = strtolower($files['target']);
 		if (preg_match('/(\.xml|\.txt)/', $target) == 1) {
@@ -2222,6 +2401,9 @@ class ExameController extends Controller
 		return true;
 	}
 
+    // Extensões cujo exame já vem completo num único arquivo (não precisa de
+    // arquivo complementar) — permite ao chamador pular a etapa de "zipar o
+    // grupo inteiro" e inserir o arquivo direto quando o grupo tem só um desses.
     private function isOneFile($name){
         $name = strtolower($name);
         if (preg_match('/(\.eeg)/',  $name) == 1) return true;
@@ -2300,11 +2482,57 @@ class ExameController extends Controller
         return substr($data, 0, strlen($data) - 4) . $ano;
     }
 
+    /**
+     * Traduz o valor cru da tag DICOM padrão BodyPartExamined (0018,0015) —
+     * o único campo de "parte do corpo" que é genérico, igual em qualquer
+     * fabricante — pro nome que já era usado internamente só no caminho
+     * getCRJDICOMInfoDR() (extraído de lá pra ficar disponível em todos os
+     * caminhos de leitura, sem duplicar a tabela). Alimenta a coluna paralela
+     * exames.parte_corpo_examinada, que não interfere em exame_id/
+     * sub_tipo_exame — esses continuam vindo da lógica específica de cada
+     * fabricante (a que já está ajustada/validada em produção).
+     *
+     * Devolve null quando a tag vem vazia (comum: nem todo equipamento a
+     * preenche — foi exatamente por isso que os caminhos de leitura
+     * "genéricos" desta classe nunca dependeram só dela) e o valor em
+     * maiúsculas, sem tradução, quando não reconhecido — melhor um valor bruto
+     * do que descartar a informação.
+     */
+    private function normalizeParteCorpoExaminada($bodyPartExamined) {
+        $bodyPartExamined = strtoupper(trim((string) $bodyPartExamined));
+        if ($bodyPartExamined === '') return null;
+
+        $traducao = array(
+            'HAND'     => 'MAO',
+            'ELBOW'    => 'COTOVELO',
+            'LSPINE'   => 'COLUNA LOMBAR',
+            'CSPINE'   => 'COLUNA CERVICAL',
+            'TSPINE'   => 'COLUNA TORACICA',
+            'CHEST'    => 'TORAX',
+            'KNEE'     => 'JOELHO',
+            'WRIST'    => 'PUNHO',
+            'SHOULDER' => 'OMBRO',
+            'HUMERUS'  => 'UMERO',
+            'SCAPULA'  => 'ESCAPULA',
+            'CLAVICLE' => 'CLAVICULA',
+            'HIP'      => 'ART. QUADRIL',
+            'FOOT'     => 'PE',
+            'ANKLE'    => 'TORNOZELO',
+            'SKULL'    => 'CRANIO',
+            'ABDOMEN'  => 'ABDOME',
+            'PELVIS'   => 'PELVE'
+        );
+
+        return $traducao[$bodyPartExamined] ?? $bodyPartExamined;
+    }
+
     private function getCRJDICOMInfoCR($dicom) {
         $dicom->parse(array('InstitutionName'));   // 0x0008,0x0080
         $dicom->parse(array('StationName'));       // 0x0008,0x1010
         $dicom->parse(array('StudyDescription'));  // 0x0008,0x1030
         $dicom->parse(array('SeriesDescription')); // 0x0008,0x103E
+        $dicom->parse(array('SeriesInstanceUID')); // 0x0020,0x000E
+        $dicom->parse(array('BodyPartExamined'));  // 0x0018,0x0015
         $dicom->parse(array('PerformedProcedureStepDescription')); // 0x0040, 0x0254
         $cliente = strtoupper($dicom->value(0x0008,0x0080));
         $studyDescription = trim(strtoupper($dicom->value(0x0008,0x1030)));
@@ -2335,7 +2563,9 @@ class ExameController extends Controller
 			'exame' => $seriesDescription,
 			'subtipo' => $tipoExame,
             'medico' => $medico,
-            'empresa' => $empresa
+            'empresa' => $empresa,
+            'series_uid' => trim($dicom->value(0x0020,0x000E)),
+            'parte_corpo_examinada' => $this->normalizeParteCorpoExaminada($dicom->value(0x0018,0x0015))
 		);
         return $info;
     }
@@ -2345,6 +2575,7 @@ class ExameController extends Controller
         $dicom->parse(array('StationName'));     // 0x0008,0x1010
         $dicom->parse(array('StudyDescription'));  // 0x0008,0x1030
         $dicom->parse(array('SeriesDescription')); // 0x0008,0x103E
+        $dicom->parse(array('SeriesInstanceUID')); // 0x0020,0x000E
         $dicom->parse(array('PatientID')); //    0x0010,0x0020 CPF ou RG
         $dicom->parse(array('BodyPartExamined'));  // 0x0018,0015
         $dicom->parse(array('ProtocolName'));  // 0x0018,1030
@@ -2450,7 +2681,9 @@ class ExameController extends Controller
             'subtipo' => $tipoExame,
             'medico' => $medico,
             'empresa' => $empresa,
-            'cpf' => ''
+            'cpf' => '',
+            'series_uid' => trim($dicom->value(0x0020,0x000E)),
+            'parte_corpo_examinada' => $this->normalizeParteCorpoExaminada($bodypartexamined)
         );
 
         return $info;
@@ -2458,6 +2691,8 @@ class ExameController extends Controller
     }
 
     private function getCRJDICOMInfoDRVan($dicom) {
+        $dicom->parse(array('SeriesInstanceUID')); // 0x0020,0x000E
+        $dicom->parse(array('BodyPartExamined'));  // 0x0018,0x0015
         $cliente = strtoupper($dicom->value(0x0008,0x0080));
         $seriesDescription = $this->remove_accents(trim(strtoupper($dicom->value(0x0008,0x103E))));
         $bodyPartExamined = $this->remove_accents(trim(strtoupper($dicom->value(0x0018,0x0015))));
@@ -2484,7 +2719,9 @@ class ExameController extends Controller
             'subtipo' => $tipoExame,
             'medico' => $medico,
             'empresa' => $empresa,
-            'cpf' => $cpf
+            'cpf' => $cpf,
+            'series_uid' => trim($dicom->value(0x0020,0x000E)),
+            'parte_corpo_examinada' => $this->normalizeParteCorpoExaminada($bodyPartExamined)
         );
         return $info;
     }
@@ -2493,6 +2730,7 @@ class ExameController extends Controller
         $dicom->parse(array('InstitutionName'));   // 0x0008,0x0080
         $dicom->parse(array('StationName'));     // 0x0008,0x1010
         $dicom->parse(array('StudyDescription'));  // 0x0008,0x1030
+        $dicom->parse(array('SeriesInstanceUID')); // 0x0020,0x000E
         $dicom->parse(array('PatientID')); //    0x0010,0x0020 CPF ou RG
         $dicom->parse(array('BodyPartExamined'));  // 0x0018, 0x0015
         $dicom->parse(array('ProtocolName'));  // 0x0018, 0x1030
@@ -2531,23 +2769,47 @@ class ExameController extends Controller
             'exame' => $bodypartexamined,
             'medico' => $medico,
             'empresa' => $empresa,
-            'subtipo' => $tipoExame
+            'subtipo' => $tipoExame,
+            'series_uid' => trim($dicom->value(0x0020,0x000E)),
+            'parte_corpo_examinada' => $this->normalizeParteCorpoExaminada($bodypartexamined)
         );
 
         return $info;
 
     }
 
+    /**
+     * Lê uma instância DICOM e devolve a informação que groupDCMFile() precisa
+     * pra decidir (a) em qual grupo de exame ela entra e (b) o que mostrar
+     * quando esse grupo virar um exame. Essa É a lógica de "separar por tipo"
+     * — o campo 'id' do objeto retornado é a chave de agrupamento.
+     *
+     * Algumas marcas de equipamento gravam as tags de um jeito totalmente
+     * diferente (os ramos CRJ/KONICA/BEMVIVER/E-COM abaixo), então essas têm
+     * suas próprias funções de leitura (getCRJDICOMInfoCR/DR/DRVan,
+     * getBEMVIVERDICOMInfoDR) em vez da lógica genérica mais abaixo —
+     * detectadas por StationName/Manufacturer (0x0008,0x1010 / 0x0008,0x0070).
+     *
+     * O caminho genérico (sem marca específica) devolve:
+     *   'id'      => StudyInstanceUID + '-' + tipoExame — mesmo estudo + mesmo
+     *                nome de exame normalizado = mesmo grupo, ou seja, mesmo exame.
+     *   'subtipo' => o próprio nome do exame normalizado (tipoExame), exibido
+     *                como exames.sub_tipo_exame — ver insertExame()/insertExameDCM().
+     *   'oit'     => "S"/"N" se parece um raio-x de tórax OIT (isOit(), baseado
+     *                nas tags PatientComments/AcquisitionDevice).
+     */
     private function getDICOMInfo($file){
 
         $dicom = Dicom::getInstance($this->storePath($file));
 
         $dicom->parse(array('StudyInstanceUID'));  // 0x0020,0x000D
+        $dicom->parse(array('SeriesInstanceUID')); // 0x0020,0x000E
         $dicom->parse(array('InstitutionName'));   // 0x0008,0x0080
         $dicom->parse(array('SeriesDescription')); // 0x0008,0x103E
         $dicom->parse(array('PatientComments'));   // 0x0010,0x4000
         $dicom->parse(array('StationName'));       // 0x0008,0x1010
         $dicom->parse(array('AcquisitionDeviceProcessingDescription')); // 0x0018,0x1400
+        $dicom->parse(array('BodyPartExamined'));  // 0x0018,0x0015
 
         if (trim($dicom->value(0x0008,0x1010)) == 'XC_DICOM_CRJ') return $this->getCRJDICOMInfoCR($dicom);
         if (trim($dicom->value(0x0008,0x0070)) == 'KONICA MINOLTA') return $this->getCRJDICOMInfoDR($dicom); //Thais
@@ -2586,12 +2848,26 @@ class ExameController extends Controller
             'exame' => $seriesDescription,
             'subtipo' => $tipoExame,
             'medico' => null,
-            'empresa' => null
+            'empresa' => null,
+            'series_uid' => trim($dicom->value(0x0020,0x000E)),
+            'parte_corpo_examinada' => $this->normalizeParteCorpoExaminada($dicom->value(0x0018,0x0015))
         );
 
         return $info;
     }
 
+    /**
+     * Metade DICOM do loop de insertZip() que percorre cada entrada do zip (a
+     * metade não-DICOM é addFileInList). Ignora tudo que não for .dcm/.oit,
+     * extrai o que for pra $path_dcm com um nome aleatório (o nome da entrada
+     * no zip não é confiável/único o suficiente pra usar direto), e então
+     * delega pro groupDCMFile() colocar o arquivo no grupo de tipo certo.
+     *
+     * ".oit" também é um arquivo DICOM (uma convenção de nome própria da Dama
+     * que significa "esse aqui é um exame OIT"), por isso o hint isOit
+     * passado pro groupDCMFile — ele evita ter que rodar a detecção de OIT
+     * baseada em tags que groupDCMFile()/getDICOMInfo fariam por padrão.
+     */
     private function addDCMFileInList($dcm_files, $zip, $name, $path_dcm){
         if (preg_match('/(\.dcm|\.oit)/', strtolower($name)) !== 1) return $dcm_files;
         $isOit = (preg_match('/(\.oit)/', strtolower($name)) == 1) ? "S" : "N";
@@ -2601,8 +2877,47 @@ class ExameController extends Controller
             $this->storePath($path_dcm),
             $new_name
         );
+        return $this->groupDCMFile($dcm_files, $path_dcm, $new_name, $isOit);
+    }
+
+    /**
+     * Mesmo agrupamento (por StudyInstanceUID + tipoExame, via getDICOMInfo())
+     * do addDCMFileInList() acima, mas para uma instância DICOM que chegou como
+     * bytes crus (Orthanc) em vez de uma entrada de zip (envio de lote). Usado
+     * por OrthancExameImporter::importStudy() pra agrupar os estudos do
+     * Orthanc num exame por tipo, exatamente como um zip de lote faz.
+     */
+    protected function addDCMBytesInList($dcm_files, $bytes, $path_dcm){
+        if (!is_dir($this->storePath($path_dcm))) {
+            mkdir($this->storePath($path_dcm), 0777, true);
+        }
+        $new_name = md5(uniqid(rand(), true)) . '.dcm';
+        file_put_contents($this->storePath($path_dcm.$new_name), $bytes);
+        return $this->groupDCMFile($dcm_files, $path_dcm, $new_name, "N");
+    }
+
+    /**
+     * O passo de agrupamento de verdade, compartilhado pelas duas entradas: a
+     * do zip (addDCMFileInList) e a do Orthanc (addDCMBytesInList). $dcm_files
+     * é um acumulador que vai sendo montado, indexado pelo 'id' do
+     * getDICOMInfo() (StudyInstanceUID + tipoExame):
+     *
+     *  - id já visto    -> essa instância entra nesse grupo: renomeada pra
+     *    "<zip_name_do_grupo>_<n>.dcm" (n = quantos arquivos já tem no grupo)
+     *    e adicionada em 'files'/'exames'.
+     *  - id ainda não visto -> começa um grupo novo, com um "zip_name"
+     *    aleatório novo (usado depois por createDCMZip() pra nomear o zip do
+     *    grupo, e por insertExameDCM() pra nomear o arquivo do exame salvo).
+     *
+     * DCM2JPG() é chamado em toda instância desde já (não só na que vai acabar
+     * representando o exame) porque nesse ponto do fluxo ainda não se sabe qual
+     * arquivo o processDCMGroups()/insertExameDCM() vai tratar como imagem de
+     * preview do grupo — sai mais barato converter todas agora do que
+     * descobrir isso depois e converter só uma.
+     */
+    private function groupDCMFile($dcm_files, $path_dcm, $new_name, $isOitHint){
         $info = $this->getDICOMInfo($path_dcm.$new_name);
-        $isOit = ($isOit == "S") ? "S" : $info->oit;
+        $isOit = ($isOitHint == "S") ? "S" : $info->oit;
         if (array_key_exists($info->id, $dcm_files)){
             $final_name = $dcm_files[$info->id]['zip_name'] . '_' . count($dcm_files[$info->id]['files']) . '.dcm';
             $dcm_files[$info->id]['files'][] = $final_name;
@@ -2622,7 +2937,14 @@ class ExameController extends Controller
             'exames' => array($info->exame),
             'subtipo' => $info->subtipo,
             'medico' => $info->medico,
-            'empresa' => $info->empresa
+            'empresa' => $info->empresa,
+            // Guardado pro link do viewer do Orthanc (ver processDCMGroups/
+            // insertExameDCM) — todas as instâncias de um grupo pertencem à
+            // mesma série DICOM na prática (o agrupamento por tipoExame já
+            // segue a SeriesDescription, que é um atributo por série), então
+            // basta pegar da primeira instância do grupo.
+            'series_uid' => $info->series_uid ?? null,
+            'parte_corpo_examinada' => $info->parte_corpo_examinada ?? null
         );
         $final_name = $dcm_files[$info->id]['zip_name'] . '_0.dcm';
         $dcm_files[$info->id]['files'] = array($final_name);
@@ -2669,6 +2991,19 @@ class ExameController extends Controller
         return $cliente ? $cliente->id : null;
     }
 
+    /**
+     * Descobre a qual Cliente (clínica) um grupo DICOM pertence, tentando
+     * nessa ordem — a primeira que der certo vence:
+     *  1. usuário logado na sessão (upload manual feito por um cliente logado);
+     *  2. chave_transmissao válida (o $dama_desktop_key recebido, ex: envio
+     *     pelo app desktop com uma chave configurada);
+     *  3. InstitutionName da tag DICOM (0x0008,0x0080), batendo com
+     *     clientes.institution_name_id — é o caminho usado pelo Orthanc, que
+     *     não tem sessão nem chave de transmissão própria;
+     *  4. CNPJ lido do DICOM, batendo com clientes.cnpj.
+     * Se nenhuma bater, devolve null e o grupo é descartado (ver
+     * processDCMGroups, que pula o grupo quando isso acontece).
+     */
     private function getClinicaIdDoDCM($obj, $dama_desktop_key){
         $usuario = $this->getSession('usuario');
         if ($usuario) return $usuario->conta_cliente;
@@ -2694,6 +3029,9 @@ class ExameController extends Controller
         return $usuario->tipo == 'admin' || $usuario->tipo == 'auditor';
     }
 
+    // Junta todos os arquivos .dcm de um grupo (com mais de uma instância) num
+    // único zip nomeado "<zip_name>.zip" — esse zip é o que fica guardado como
+    // arquivo do exame (ver insertExameDCM/insertExame, campo arquivo_exame).
     private function createDCMZip($obj, $path_dcm){
         $zip = new \ZipArchive();
         $name = $this->storePath($path_dcm.$obj['zip_name'].'.zip');
@@ -2731,7 +3069,10 @@ class ExameController extends Controller
             'Imagem' => null,
             'SubTipo' => null,
             'Clinica_id' => null,
-            'Funcao' => null
+            'Funcao' => null,
+            'OrthancStudyId' => null,
+            'OrthancSeriesId' => null,
+            'ParteCorpoExaminada' => null
         );
     }
 
@@ -2771,6 +3112,9 @@ class ExameController extends Controller
         $exame->Paciente   = $this->str_remove($exame->Paciente, "[^A-Za-z0-9 \.\-]"); //$this->remove_accents($exame->Paciente);
 
         $exame->Clinica_id = $params['clinica_id'];
+        $exame->OrthancStudyId = $params['orthanc_study_id'] ?? null;
+        $exame->OrthancSeriesId = $params['orthanc_series_id'] ?? null;
+        $exame->ParteCorpoExaminada = $params['parte_corpo_examinada'] ?? null;
 
         $this->insertExame($exame, $params);
 
@@ -2813,6 +3157,9 @@ class ExameController extends Controller
         $exame->Paciente   = $this->str_remove($exame->Paciente, "[^A-Za-z0-9 \.\-]"); //$this->remove_accents($exame->Paciente);
 
         $exame->Clinica_id = $params['clinica_id'];
+        $exame->OrthancStudyId = $params['orthanc_study_id'] ?? null;
+        $exame->OrthancSeriesId = $params['orthanc_series_id'] ?? null;
+        $exame->ParteCorpoExaminada = $params['parte_corpo_examinada'] ?? null;
 
         $this->insertExame($exame, $params);
 
@@ -2948,6 +3295,16 @@ class ExameController extends Controller
         return  intval($secs / 86400 / 360);
     }
 
+    /**
+     * Cria o exame de fato a partir de um grupo DICOM já pronto (montado por
+     * processDCMGroups()/isSingleDCMInserted() — $file é o primeiro arquivo do
+     * grupo, $params traz OIT/subtipo/observacao/médico/empresa/clinica_id já
+     * calculados pelo agrupamento). Lê a tag Modality (0x0008,0x0060) do DICOM
+     * pra desviar pra uma função mais específica quando o exame não é um raio-x
+     * comum: "EC" = ECG (insertExameDCM_ECG) e "US" = ultrassom
+     * (insertExameDCMPorTipo). Fora esses dois casos, segue aqui mesmo montando
+     * um exame do tipo RAIO ou RAIOX_OIT (OIT = raio-x de tórax ocupacional).
+     */
     private function insertExameDCM($file, $file_name, $dama_desktop_key, $params){
 
         $dicom = Dicom::getInstance($this->storePath($file));
@@ -3010,6 +3367,9 @@ class ExameController extends Controller
         $exame->Paciente   = $this->str_remove($exame->Paciente, "[^A-Za-z0-9 \.\-]");
 
         $exame->Clinica_id = $params['clinica_id'];
+        $exame->OrthancStudyId = $params['orthanc_study_id'] ?? null;
+        $exame->OrthancSeriesId = $params['orthanc_series_id'] ?? null;
+        $exame->ParteCorpoExaminada = $params['parte_corpo_examinada'] ?? null;
 
         $this->insertExame($exame, $params);
 
@@ -3256,6 +3616,23 @@ class ExameController extends Controller
         return $exame;
     }
 
+    /**
+     * Passo final de TODOS os caminhos de importação (lote não-DICOM, lote
+     * DICOM, Orthanc, upload avulso): recebe um objeto "$lote" já normalizado
+     * (montado por getObject() + preenchido por cada insertXXX()/insertExameDCM)
+     * e grava a linha em `exames`.
+     *
+     * Dois pontos que não são óbvios só lendo o código:
+     *  - 'exame_id' (a tabela tipo_exames) vem de um mapa fixo por 'Tipo'
+     *    (RAIO=4, ECG=1, etc, logo abaixo) — 'sub_tipo_exame' é o nome mais
+     *    específico mostrado na tela (ver getDICOMInfo() pra como ele nasce).
+     *  - $exame->crc (crc32 de vários campos, via getCRCFields) é a proteção
+     *    contra duplicidade: se o mesmo exame já foi inserido antes (mesmo
+     *    paciente/data/tipo/etc — mesmo CRC), isExameInserido() faz essa
+     *    função retornar sem criar uma segunda linha. É isso que garante que
+     *    reenviar o mesmo arquivo (ex: o Orthanc reprocessando uma mudança) não
+     *    duplica o exame.
+     */
     private function insertExame($lote, $params) {
         $cliente = $this->getClienteDoExame($lote);
         if(!$cliente) throw new ClienteNaoEncontradoException();
@@ -3306,6 +3683,9 @@ class ExameController extends Controller
         $exame->crc = crc32($this->getCRCFields($lote));
         $exame->empresa = Self::$LOGIN_EMPRESA_DO_DOMINIO;
         $exame->enviado_por = Self::$TIPO_ENVIO;
+        $exame->orthanc_study_id = $lote->OrthancStudyId;
+        $exame->orthanc_series_id = $lote->OrthancSeriesId;
+        $exame->parte_corpo_examinada = $lote->ParteCorpoExaminada;
         $exame->emergencia = $this->setLaudoRapidoOuEmergencia($cliente, $exame->exame_id);
         $exame->preco_exame = 0;
         $exame->preco_exame_medico = 0;
@@ -3707,6 +4087,14 @@ class ExameController extends Controller
 
     }
 
+    /**
+     * Caminho "avulso" de importação DICOM: cria um exame pra UMA única
+     * instância, sem passar pelo agrupamento por tipo (processDCMGroups). É o
+     * que doInsert()/upload() (upload direto, fora do fluxo de lote) usam, e
+     * também o que OrthancExameImporter::importInstance() usa (mantido por
+     * compatibilidade — o fluxo padrão do Orthanc hoje é importStudy(), que já
+     * agrupa por tipo antes de chegar aqui, via insertExameDCM()).
+     */
     function insertDCM($file, $file_name, $dama_desktop_key, $params) {
         $isOit = preg_match('/(\.oit)/', strtolower($file)) == 1;
         if ($isOit) {

@@ -21,6 +21,9 @@ RUN apt-get install -y libmcrypt-dev \
     && pecl channel-update pecl.php.net \
     && pecl install mcrypt
 
+#java (necessário para geração de QR code e conversão PDF2PNG via .jar)
+RUN apt-get install -y default-jre
+
 #composer
 # https://composer.github.io/installer.sig
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
