@@ -279,6 +279,16 @@ class ExameController extends Controller
         $exame['soc_seq_ficha'] = $exameSoc['soc_seq_ficha'];
         $exame['soc_codigo_exame'] = $exameSoc['soc_codigo_exame'];
 
+        // getExameParaLaudar() vem de uma stored procedure (GetExameParaLaudar)
+        // com lista fixa de colunas, que não inclui as colunas novas do Orthanc
+        // — busca elas à parte, igual já é feito acima pra soc_seq_resultado/etc.
+        // Sem isso, o botão "Visualizar raio-x" nunca aparecia pra quem passa
+        // por essa tela (médico laudando), só pra cliente/empresa (que usa
+        // getExame() abaixo, que já tinha o campo).
+        $exameOrthanc = Exame::where('id', $id)->first(['orthanc_study_id', 'orthanc_series_id', 'parte_corpo_examinada']);
+        $exame['orthanc_viewer_series_ids'] = $this->getOrthancSeriesIdsDoGrupoAnatomico($exameOrthanc);
+        $exame['orthanc_viewer_url'] = $this->getOrthancViewerUrl($exameOrthanc, $exame['orthanc_viewer_series_ids']);
+
         return $exame;
     }
 
