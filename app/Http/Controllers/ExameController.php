@@ -38,6 +38,8 @@ use App\Models\MedicoExame;
 use App\Models\DespachoRegra;
 
 use App\Utils\Dicom;
+use App\Utils\DicomFields;
+use App\Services\Dicom\DicomProfileResolver;
 use App\Utils\PdfToText;
 use App\Utils\Utils;
 
@@ -2509,7 +2511,8 @@ class ExameController extends Controller
      * do que descartar a informação.
      */
     private function normalizeParteCorpoExaminada($bodyPartExamined) {
-        $bodyPartExamined = strtoupper(trim((string) $bodyPartExamined));
+        // Tolera byte corrompido ("T?RAX" da Fuji) e acento antes de traduzir.
+        $bodyPartExamined = DicomFields::normalizeBodyPart($bodyPartExamined);
         if ($bodyPartExamined === '') return null;
 
         $traducao = array(
@@ -2519,6 +2522,7 @@ class ExameController extends Controller
             'CSPINE'   => 'COLUNA CERVICAL',
             'TSPINE'   => 'COLUNA TORACICA',
             'CHEST'    => 'TORAX',
+            'THORAX'   => 'TORAX',
             'KNEE'     => 'JOELHO',
             'WRIST'    => 'PUNHO',
             'SHOULDER' => 'OMBRO',
@@ -2533,7 +2537,31 @@ class ExameController extends Controller
             'PELVIS'   => 'PELVE'
         );
 
+        // Traduções cadastradas na tela de administração vencem a tabela do código.
+        $traducao = array_merge($traducao, DicomProfileResolver::traducoes());
+
         return $traducao[$bodyPartExamined] ?? $bodyPartExamined;
+    }
+
+    /**
+     * Descrição de exame de último recurso pra quem não preenche
+     * SeriesDescription/0018,1400: ProtocolName, StudyDescription e por fim
+     * BodyPartExamined (já reparado), ignorando placeholders como "undefined".
+     */
+    private function getDescricaoFallbackDCM($dicom) {
+        $dicom->parse(array('PerformedProcedureStepDescription')); // 0x0040,0x0254
+        $dicom->parse(array('RequestedProcedureDescription'));     // 0x0032,0x1060
+        $candidatos = array(
+            $dicom->value(0x0018,0x1030), // ProtocolName
+            $dicom->value(0x0040,0x0254), // PerformedProcedureStepDescription (Carestream, Siemens, GE)
+            $dicom->value(0x0008,0x1030), // StudyDescription
+            $dicom->value(0x0032,0x1060)  // RequestedProcedureDescription
+        );
+        foreach ($candidatos as $candidato) {
+            $candidato = trim((string) $candidato);
+            if (!DicomFields::isPlaceholder($candidato)) return $candidato;
+        }
+        return DicomFields::normalizeBodyPart($dicom->value(0x0018,0x0015));
     }
 
     private function getCRJDICOMInfoCR($dicom) {
@@ -2612,6 +2640,7 @@ class ExameController extends Controller
             )
         );
 
+        $studyDescriptionCompleta = DicomFields::toAsciiUpper($dicom->value(0x0008,0x1030));  // ex: "TORAX OIT", "COLUNA LOMBO SACRA" (Braga)
         $ausencia_tipoExame = substr($dicom->value(0x0008,0x1030), 0, 5);  // 5 PRIMEIRASLETRAS  / Forearm bone //ANTEBRAÇO
 
         switch ($ausencia_tipoExame) {
@@ -2628,7 +2657,13 @@ class ExameController extends Controller
 
          $tipoExame = $this->remove_accents(trim(strtoupper($dicom->value(0x0018, 0x0015))));  //HAND
 
-        if ($tipoExame == null) $tipoExame = $ausencia_tipoExame . " - "; // thais ver
+        if ($tipoExame == null) {
+            // Os 3 casos conhecidos mantêm o formato antigo; qualquer outra
+            // descrição usa o texto completo em vez de 5 letras ("COLUN - ").
+            $tipoExame = in_array($ausencia_tipoExame, array("SEIOS DA FACE", "ANTEBRAÇO", "CAVUM"), true)
+                ? $ausencia_tipoExame . " - "
+                : ($studyDescriptionCompleta !== '' ? $studyDescriptionCompleta : $ausencia_tipoExame . " - ");
+        }
          switch ($tipoExame) {
             case "HAND":
                 $tipoExame = "MAO";
@@ -2682,6 +2717,8 @@ class ExameController extends Controller
 
         $isOit = $studyDescription == 'TORAX PA/AP' && $bodypartexamined == 'CHEST' &&
                  $patientposition == 'OIT PA' ? "S" : "N";
+        // Konica + ImagePilot (Braga) manda a descrição do estudo como "TORAX OIT".
+        if ($isOit == "N" && preg_match('/^TORAX\b.*\bOIT\b/', $studyDescriptionCompleta) === 1) $isOit = "S";
 
         $info = (object)array(
             'id' => $id,
@@ -2820,16 +2857,41 @@ class ExameController extends Controller
         $dicom->parse(array('StationName'));       // 0x0008,0x1010
         $dicom->parse(array('AcquisitionDeviceProcessingDescription')); // 0x0018,0x1400
         $dicom->parse(array('BodyPartExamined'));  // 0x0018,0x0015
+        $dicom->parse(array('ProtocolName'));      // 0x0018,0x1030
+        $dicom->parse(array('StudyDescription'));  // 0x0008,0x1030
 
-        if (trim($dicom->value(0x0008,0x1010)) == 'XC_DICOM_CRJ') return $this->getCRJDICOMInfoCR($dicom);
-        if (trim($dicom->value(0x0008,0x0070)) == 'KONICA MINOLTA') return $this->getCRJDICOMInfoDR($dicom); //Thais
-        if (trim($dicom->value(0x0008,0x0070)) == 'Imex Medical Group') return $this->getBEMVIVERDICOMInfoDR($dicom); //Thais
-        if (trim($dicom->value(0x0008,0x0070)) == 'E-COM Technology Limited.') return $this->getCRJDICOMInfoDRVan($dicom);
+        $equipamento = DicomProfileResolver::equipamento($dicom);
 
+        // 1) Leituras dedicadas em código (ajustadas/validadas em produção) —
+        //    sempre testadas primeiro, os perfis do banco não as substituem.
+        $legacy = null;
+        if (trim($dicom->value(0x0008,0x1010)) == 'XC_DICOM_CRJ') $legacy = $this->getCRJDICOMInfoCR($dicom);
+        elseif (trim($dicom->value(0x0008,0x0070)) == 'KONICA MINOLTA') $legacy = $this->getCRJDICOMInfoDR($dicom); //Thais
+        elseif (trim($dicom->value(0x0008,0x0070)) == 'Imex Medical Group') $legacy = $this->getBEMVIVERDICOMInfoDR($dicom); //Thais
+        elseif (trim($dicom->value(0x0008,0x0070)) == 'E-COM Technology Limited.') $legacy = $this->getCRJDICOMInfoDRVan($dicom);
+        if ($legacy) {
+            DicomProfileResolver::registrarVisto($equipamento, null, 'codigo', $legacy->subtipo ?? null);
+            return $legacy;
+        }
+
+        // 2) Perfil cadastrado no banco pra esse fabricante/modelo (tela de administração).
+        $resolver = new DicomProfileResolver();
+        $perfil = $resolver->perfilPara($equipamento);
+        if ($perfil) {
+            $info = $resolver->montarInfo($perfil, $dicom);
+            $info->parte_corpo_examinada = $this->normalizeParteCorpoExaminada($dicom->value(0x0018,0x0015));
+            DicomProfileResolver::registrarVisto($equipamento, $perfil, 'banco', $info->subtipo);
+            return $info;
+        }
+
+        // 3) Leitura genérica (padrão DICOM).
         $cliente = $dicom->value(0x0008,0x0080);
 
         $seriesDescription = trim($dicom->value(0x0008,0x103E));
         if (strlen($seriesDescription) == 0) $seriesDescription = trim($dicom->value(0x0018,0x1400));
+        // Fabricantes que não preenchem SeriesDescription nem 0018,1400 (ex: Fuji CR):
+        // cai pro protocolo, depois descrição do estudo, depois parte do corpo.
+        if (strlen($seriesDescription) == 0) $seriesDescription = $this->getDescricaoFallbackDCM($dicom);
         $seriesDescription = strtoupper($seriesDescription);
         $seriesDescription = $this->str_remove($seriesDescription, "[^A-Z0-9 ]");
 
@@ -2850,6 +2912,13 @@ class ExameController extends Controller
         $id = $dicom->value(0x0020,0x000D) . '-' . $tipoExame;
 
         $isOit = $this->isOit($dicom) ? "S" : "N";
+        if ($isOit == "N" && DicomFields::isOitByText(array(
+            $dicom->value(0x0018,0x1030), $dicom->value(0x0008,0x1030), $dicom->value(0x0008,0x103E)
+        ))) $isOit = "S";
+
+        // Equipamento sem perfil: aparece na tela "equipamentos vistos" com o
+        // tipo que a leitura genérica achou (vazio = precisa de perfil novo).
+        DicomProfileResolver::registrarVisto($equipamento, null, 'generico', $tipoExame);
 
         $info = (object)array(
             'id' => $id,
@@ -3325,6 +3394,7 @@ class ExameController extends Controller
         $dicom->parse(array('PatientBirthDate'));   // 0x0010,0x0030
         $dicom->parse(array('PatientSex'));         // 0x0010,0x0040
         $dicom->parse(array('Modality'));           // 0x0008,0x0060
+        $dicom->parse(array('StudyDate'));          // 0x0008,0x0020
 
         $tipoExame = trim($dicom->value(0x0008,0x0060));
 
@@ -3344,7 +3414,10 @@ class ExameController extends Controller
 
         $exame->Tipo        = $isOit ? "RAIOX_OIT" : ($this->isOIT($dicom) ? 'RAIOX_OIT' : 'RAIO');
         $exame->SubTipo     = $params['subtipo'];
-        $exame->Data        = $this->toDateAAAAMMDD($dicom->value(0x0008, 0x0022));
+        // Alguns equipamentos (ex: Konica CS-7) não gravam AcquisitionDate.
+        $dataExame = trim($dicom->value(0x0008, 0x0022));
+        if (strlen($dataExame) < 8) $dataExame = trim($dicom->value(0x0008, 0x0020));
+        $exame->Data        = $this->toDateAAAAMMDD($dataExame);
         $exame->Paciente    = $dicom->value(0x0010, 0x0010);
         $exame->DataNasc    = $this->toDateAAAAMMDD($dicom->value(0x0010, 0x0030));
         $exame->Idade       = $this->getIdade($exame->DataNasc);
@@ -3367,6 +3440,13 @@ class ExameController extends Controller
             $doc = Utils::getRG_CPF($this->onlyDigits($dicom->value(0x0010, 0x0020)));
             $exame->RG = $doc['RG'];
             $exame->CPF = $doc['CPF'];
+        }
+
+        // Qualquer outro fabricante (ex: Fuji): só aceita o PatientID como CPF se
+        // for um CPF válido, nunca como RG — o Imex grava o AccessionNumber ali.
+        if (empty($exame->CPF) && empty($exame->RG)) {
+            $cpf = DicomFields::onlyDigits($dicom->value(0x0010, 0x0020));
+            if (Utils::isCPF($cpf)) $exame->CPF = $cpf;
         }
 
         $exame->Imagem      = ($params && $params['imagem']) ? $params['imagem'] : null;

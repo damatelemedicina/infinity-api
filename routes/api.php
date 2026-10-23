@@ -32,6 +32,7 @@ use App\Http\Controllers\PainelController;
 use Illuminate\Support\Facades\File;
 use App\Http\Controllers\OperacaoController;
 use App\Http\Controllers\TipoDocumentoController;
+use App\Http\Controllers\DicomPerfilController;
 
 /*
 |--------------------------------------------------------------------------
@@ -205,6 +206,16 @@ Route::middleware(['apiToken'])->group(function () {
     Route::post('/setTipoDocumento', [TipoDocumentoController::class, 'setTipoDocumento']);
     Route::post('/getTipoDocumento', [TipoDocumentoController::class, 'getTipoDocumento']);
     Route::post('/getTiposDocumentos', [TipoDocumentoController::class, 'getTiposDocumentos']);
+
+    Route::post('/getDicomPerfis', [DicomPerfilController::class, 'getDicomPerfis']);
+    Route::post('/getDicomPerfil', [DicomPerfilController::class, 'getDicomPerfil']);
+    Route::post('/setDicomPerfil', [DicomPerfilController::class, 'setDicomPerfil']);
+    Route::post('/excluirDicomPerfil', [DicomPerfilController::class, 'excluirDicomPerfil']);
+    Route::post('/getDicomTags', [DicomPerfilController::class, 'getDicomTags']);
+    Route::post('/getDicomEquipamentosVistos', [DicomPerfilController::class, 'getDicomEquipamentosVistos']);
+    Route::post('/getDicomTraducoes', [DicomPerfilController::class, 'getDicomTraducoes']);
+    Route::post('/setDicomTraducao', [DicomPerfilController::class, 'setDicomTraducao']);
+    Route::post('/excluirDicomTraducao', [DicomPerfilController::class, 'excluirDicomTraducao']);
 
     Route::post('/serverProcessingDocumento', [DocumentoController::class, 'serverProcessingDocumento']);
     Route::post('/setDocumento', [DocumentoController::class, 'setDocumento']);

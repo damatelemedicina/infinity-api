@@ -20,15 +20,21 @@ class PerfilViewModel extends BaseViewModel
 
     public static function popularPermissoes($todas, $perfil_id, Perfil $perfil)
     {
+        // Só cria as autorizações que faltam e NÃO chama getPermissoes() de novo: antes, a
+        // recursão inseria uma autorização pra TODAS as permissões a cada volta e, se a
+        // contagem nunca fechasse (ex: permissão nova sem autorização nos perfis), o laço
+        // não terminava — estourava a memória, travava o login e enchia a tabela.
+        $existentes = Autorizacao::where('perfil_id', $perfil_id)->pluck('permissao_id')->all();
         foreach($todas as $permissao)
         {
+            if (in_array($permissao->id, $existentes)) continue;
             $autorizacao = new Autorizacao();
             $autorizacao->perfil_id = $perfil_id;
             $autorizacao->permissao_id = $permissao->id;
             $autorizacao->acesso = Autorizacao::$PADRAO;
             $autorizacao->save();
         }
-        return Self::getPermissoes($perfil);
+        return Self::callStoredProcedure("CALL GetPermissoesDoPerfil('{$perfil_id}')");
     }
 
     public static function getPermissoes(Perfil $perfil)
