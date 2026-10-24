@@ -3109,14 +3109,19 @@ class ExameController extends Controller
     }
 
     /**
-     * Empresa do exame de um grupo DICOM. Normalmente é o texto lido da tag
-     * (obj['empresa']); quando o perfil DICOM manda usar "o cliente do envio",
-     * é o nome do Cliente já resolvido pra esse grupo ($clinica_id — o cliente
-     * logado no envio em lote, ou o achado pela chave/InstitutionNameId no
-     * Orthanc), e não um hash refeito aqui.
+     * Empresa do exame de um grupo DICOM (vira exames.contratante, o "Empresa:"
+     * do laudo). Normalmente é o texto lido da tag (obj['empresa']).
+     *
+     * Quando o perfil DICOM manda usar "a empresa logada":
+     *  - envio pela tela (lote/upload, com usuário logado): é o nome do Cliente
+     *    logado ($clinica_id);
+     *  - Orthanc e DAMA Desktop (sem usuário logado): o Cliente achado pelo
+     *    aparelho é a CLÍNICA, não a empresa do paciente — então não preenche
+     *    nada aqui e a empresa é informada na tela de laudo.
      */
     private function empresaDoGrupo($obj, $clinica_id) {
         if (empty($obj['empresa_do_cliente'])) return $obj['empresa'];
+        if (!$this->getSession('usuario')) return $obj['empresa'];
         $nome = Cliente::where('id', $clinica_id)->value('nome');
         return $nome ? (DicomFields::toAsciiUpper($nome) ?: $obj['empresa']) : $obj['empresa'];
     }

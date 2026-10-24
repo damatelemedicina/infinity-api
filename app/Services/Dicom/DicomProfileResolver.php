@@ -84,13 +84,13 @@ class DicomProfileResolver
     }
 
     /**
-     * Valor especial de empresa_tag: em vez de uma tag, usa o nome do Cliente do
-     * envio — o mesmo que o sistema já resolveu pra gravar o exame: o cliente
-     * logado (envio em lote), o da chave de transmissão ou o achado pelo
-     * InstitutionNameId (Orthanc), nessa ordem (ver getClinicaIdDoDCM).
+     * Valor especial de empresa_tag: em vez de uma tag, usa a empresa (cliente)
+     * LOGADA — só no envio pela tela. No Orthanc e no DAMA Desktop não há usuário
+     * logado e o cliente achado é a clínica, então a empresa fica em branco para
+     * ser informada na tela de laudo (ver ExameController::empresaDoGrupo).
      */
     public const ORIGEM_CLIENTE = '@CLIENTE';
-    public const ROTULO_ORIGEM_CLIENTE = 'Cliente do envio (o cliente logado ou o identificado pelo aparelho)';
+    public const ROTULO_ORIGEM_CLIENTE = 'Empresa logada (só no envio pela tela)';
 
     /** Tags aceitas como origem de médico/empresa. */
     public const TAGS_TEXTO = [
