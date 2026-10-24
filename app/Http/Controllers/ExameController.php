@@ -3791,9 +3791,11 @@ class ExameController extends Controller
         $exame->crc = crc32($this->getCRCFields($lote));
         $exame->empresa = Self::$LOGIN_EMPRESA_DO_DOMINIO;
         $exame->enviado_por = Self::$TIPO_ENVIO;
-        $exame->orthanc_study_id = $lote->OrthancStudyId;
-        $exame->orthanc_series_id = $lote->OrthancSeriesId;
-        $exame->parte_corpo_examinada = $lote->ParteCorpoExaminada;
+        // "?? null": os builders de ECG (CardioBrasil) e espirometria (WinspiroPro) montam
+        // o próprio objeto, sem os campos do Orthanc — ler direto dava "Undefined property".
+        $exame->orthanc_study_id = $lote->OrthancStudyId ?? null;
+        $exame->orthanc_series_id = $lote->OrthancSeriesId ?? null;
+        $exame->parte_corpo_examinada = $lote->ParteCorpoExaminada ?? null;
         $exame->emergencia = $this->setLaudoRapidoOuEmergencia($cliente, $exame->exame_id);
         $exame->preco_exame = 0;
         $exame->preco_exame_medico = 0;
