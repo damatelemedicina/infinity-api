@@ -3115,11 +3115,13 @@ class ExameController extends Controller
      * Quando o perfil DICOM manda usar "a empresa logada":
      *  - envio pela tela (lote/upload, com usuário logado): é o nome do Cliente
      *    logado ($clinica_id);
-     *  - Orthanc e DAMA Desktop (sem usuário logado): o Cliente achado pelo
-     *    aparelho é a CLÍNICA, não a empresa do paciente — então não preenche
-     *    nada aqui e a empresa é informada na tela de laudo.
+     *  - DAMA Desktop (sem usuário logado): o Cliente achado pela chave é a
+     *    CLÍNICA, não a empresa do paciente — não preenche, fica pro laudo.
+     *
+     * O Orthanc tem o seu próprio método (OrthancExameImporter::empresaDoGrupo),
+     * que nunca usa a empresa logada.
      */
-    private function empresaDoGrupo($obj, $clinica_id) {
+    protected function empresaDoGrupo($obj, $clinica_id) {
         if (empty($obj['empresa_do_cliente'])) return $obj['empresa'];
         if (!$this->getSession('usuario')) return $obj['empresa'];
         $nome = Cliente::where('id', $clinica_id)->value('nome');
@@ -3684,15 +3686,6 @@ class ExameController extends Controller
         $paciente->save();
     }
 
-    private function getClienteByMedicoSolicitantePorNome($clienteId, $nome) {
-        if (empty(trim($nome))) return $clienteId;
-        $medico = Medico::where('nome', strtoupper($nome))->first();
-        if (!$medico) return $clienteId;
-        $cliente = Cliente::where('id', $medico->solicitante)->first();
-        if (!$cliente) return $clienteId;
-        return $cliente->id;
-    }
-
     function saveLaudoRapido(Request $request) {
         $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
         if (!$empresa) throw new EmpresaNaoEncontradaException();
@@ -3757,7 +3750,10 @@ class ExameController extends Controller
 
         $exame = new Exame();
 
-        $exame->cliente_id = $this->getClienteByMedicoSolicitantePorNome($cliente->id, $lote->Medico);
+        // Cliente (a empresa a quem o exame é cobrado/entregue) é sempre o do envio:
+        // o logado na tela ou o do aparelho no Orthanc. O médico solicitante é outra
+        // coisa — fica só gravado em medico_solicitante, sem trocar o cliente.
+        $exame->cliente_id = $cliente->id;
 
         $this->registerPaciente($lote);
 

@@ -176,6 +176,19 @@ class OrthancExameImporter extends ExameController
     }
 
     /**
+     * Empresa do exame vinda do Orthanc: o Cliente achado pelo aparelho
+     * (InstitutionNameId) é a CLÍNICA que fez o exame, não a empresa onde o
+     * paciente trabalha — então a opção "empresa logada" do perfil DICOM não
+     * preenche nada aqui, e o campo "Empresa:" é informado na tela de laudo.
+     * Sem a opção, vale o texto lido da tag, como em qualquer envio.
+     * (O envio pela tela usa ExameController::empresaDoGrupo.)
+     */
+    protected function empresaDoGrupo($obj, $clinica_id)
+    {
+        return $obj['empresa'];
+    }
+
+    /**
      * Lê o StudyInstanceUID (tag DICOM 0020,000D) de um arquivo já baixado —
      * é esse valor, e não o ID interno do Orthanc, que o Stone Web Viewer
      * espera no parâmetro "study=" da URL (ele resolve os dados via DICOMweb,
