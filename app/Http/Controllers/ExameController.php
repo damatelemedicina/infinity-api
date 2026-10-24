@@ -1916,6 +1916,7 @@ class ExameController extends Controller
 
         }
 
+
         if (count($file_upload_list) > 0) {
             $data = $this->doZipFiles($file_upload_list);
             if ($data == null) return;
@@ -2181,7 +2182,7 @@ class ExameController extends Controller
 					'observacao' => substr($observacao, 0, strlen($observacao)-3),
 					'subtipo' => $obj['subtipo'],
                     'medico' => $obj['medico'],
-                    'empresa' => $obj['empresa'],
+                    'empresa' => $this->empresaDoGrupo($obj, $clinica_id),
                     'recepcionado' => $CLIENTE_ID,
                     'orthanc_study_id' => $orthanc_study_id,
                     'orthanc_series_id' => $obj['series_uid'] ?? null,
@@ -2219,7 +2220,7 @@ class ExameController extends Controller
             'observacao' => substr($observacao, 0, strlen($observacao)-3),
             'subtipo' => $obj['subtipo'],
             'medico' => $obj['medico'],
-            'empresa' => $obj['empresa'],
+            'empresa' => $this->empresaDoGrupo($obj, $clinica_id),
             'recepcionado' => $CLIENTE_ID,
             'orthanc_study_id' => $orthanc_study_id,
             'orthanc_series_id' => $obj['series_uid'] ?? null,
@@ -3017,6 +3018,9 @@ class ExameController extends Controller
             'subtipo' => $info->subtipo,
             'medico' => $info->medico,
             'empresa' => $info->empresa,
+            // Perfil DICOM pediu "empresa = cliente do envio": resolvido em processDCMGroups,
+            // já com o cliente certo (logado / chave / InstitutionNameId).
+            'empresa_do_cliente' => $info->empresa_do_cliente ?? false,
             // Guardado pro link do viewer do Orthanc (ver processDCMGroups/
             // insertExameDCM) — todas as instâncias de um grupo pertencem à
             // mesma série DICOM na prática (o agrupamento por tipoExame já
@@ -3102,6 +3106,19 @@ class ExameController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Empresa do exame de um grupo DICOM. Normalmente é o texto lido da tag
+     * (obj['empresa']); quando o perfil DICOM manda usar "o cliente do envio",
+     * é o nome do Cliente já resolvido pra esse grupo ($clinica_id — o cliente
+     * logado no envio em lote, ou o achado pela chave/InstitutionNameId no
+     * Orthanc), e não um hash refeito aqui.
+     */
+    private function empresaDoGrupo($obj, $clinica_id) {
+        if (empty($obj['empresa_do_cliente'])) return $obj['empresa'];
+        $nome = Cliente::where('id', $clinica_id)->value('nome');
+        return $nome ? (DicomFields::toAsciiUpper($nome) ?: $obj['empresa']) : $obj['empresa'];
     }
 
     private function isAdmin($usuario){

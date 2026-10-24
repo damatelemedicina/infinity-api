@@ -115,7 +115,7 @@ class DicomPerfilController extends Controller
             'empresa' => array_merge($texto, [[
                 'valor' => DicomProfileResolver::ORIGEM_CLIENTE,
                 'rotulo' => DicomProfileResolver::ROTULO_ORIGEM_CLIENTE,
-                'descricao' => 'Usa o nome do cliente cadastrado no sistema (o mesmo que identifica a clínica pelo Institution Name Id).',
+                'descricao' => 'Usa o nome do cliente a quem o exame será atribuído: no envio em lote é o cliente logado; no Orthanc é o cliente identificado pelo aparelho (Institution Name Id).',
             ]]),
         ];
     }
