@@ -1916,6 +1916,7 @@ class ExameController extends Controller
 
         }
 
+
         if (count($file_upload_list) > 0) {
             $data = $this->doZipFiles($file_upload_list);
             if ($data == null) return;
@@ -2181,7 +2182,7 @@ class ExameController extends Controller
 					'observacao' => substr($observacao, 0, strlen($observacao)-3),
 					'subtipo' => $obj['subtipo'],
                     'medico' => $obj['medico'],
-                    'empresa' => $obj['empresa'],
+                    'empresa' => $this->empresaDoGrupo($obj, $clinica_id),
                     'recepcionado' => $CLIENTE_ID,
                     'orthanc_study_id' => $orthanc_study_id,
                     'orthanc_series_id' => $obj['series_uid'] ?? null,
@@ -2219,7 +2220,7 @@ class ExameController extends Controller
             'observacao' => substr($observacao, 0, strlen($observacao)-3),
             'subtipo' => $obj['subtipo'],
             'medico' => $obj['medico'],
-            'empresa' => $obj['empresa'],
+            'empresa' => $this->empresaDoGrupo($obj, $clinica_id),
             'recepcionado' => $CLIENTE_ID,
             'orthanc_study_id' => $orthanc_study_id,
             'orthanc_series_id' => $obj['series_uid'] ?? null,
@@ -3017,6 +3018,9 @@ class ExameController extends Controller
             'subtipo' => $info->subtipo,
             'medico' => $info->medico,
             'empresa' => $info->empresa,
+            // Perfil DICOM pediu "empresa = cliente do envio": resolvido em processDCMGroups,
+            // já com o cliente certo (logado / chave / InstitutionNameId).
+            'empresa_do_cliente' => $info->empresa_do_cliente ?? false,
             // Guardado pro link do viewer do Orthanc (ver processDCMGroups/
             // insertExameDCM) — todas as instâncias de um grupo pertencem à
             // mesma série DICOM na prática (o agrupamento por tipoExame já
@@ -3102,6 +3106,26 @@ class ExameController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Empresa do exame de um grupo DICOM (vira exames.contratante, o "Empresa:"
+     * do laudo). Normalmente é o texto lido da tag (obj['empresa']).
+     *
+     * Quando o perfil DICOM manda usar "a empresa logada":
+     *  - envio pela tela (lote/upload, com usuário logado): é o nome do Cliente
+     *    logado ($clinica_id);
+     *  - DAMA Desktop (sem usuário logado): o Cliente achado pela chave é a
+     *    CLÍNICA, não a empresa do paciente — não preenche, fica pro laudo.
+     *
+     * O Orthanc tem o seu próprio método (OrthancExameImporter::empresaDoGrupo),
+     * que nunca usa a empresa logada.
+     */
+    protected function empresaDoGrupo($obj, $clinica_id) {
+        if (empty($obj['empresa_do_cliente'])) return $obj['empresa'];
+        if (!$this->getSession('usuario')) return $obj['empresa'];
+        $nome = Cliente::where('id', $clinica_id)->value('nome');
+        return $nome ? (DicomFields::toAsciiUpper($nome) ?: $obj['empresa']) : $obj['empresa'];
     }
 
     private function isAdmin($usuario){
@@ -3662,15 +3686,6 @@ class ExameController extends Controller
         $paciente->save();
     }
 
-    private function getClienteByMedicoSolicitantePorNome($clienteId, $nome) {
-        if (empty(trim($nome))) return $clienteId;
-        $medico = Medico::where('nome', strtoupper($nome))->first();
-        if (!$medico) return $clienteId;
-        $cliente = Cliente::where('id', $medico->solicitante)->first();
-        if (!$cliente) return $clienteId;
-        return $cliente->id;
-    }
-
     function saveLaudoRapido(Request $request) {
         $empresa = Empresa::where('login', $this->getEmpresaDoDominio($request))->first();
         if (!$empresa) throw new EmpresaNaoEncontradaException();
@@ -3735,7 +3750,10 @@ class ExameController extends Controller
 
         $exame = new Exame();
 
-        $exame->cliente_id = $this->getClienteByMedicoSolicitantePorNome($cliente->id, $lote->Medico);
+        // Cliente (a empresa a quem o exame é cobrado/entregue) é sempre o do envio:
+        // o logado na tela ou o do aparelho no Orthanc. O médico solicitante é outra
+        // coisa — fica só gravado em medico_solicitante, sem trocar o cliente.
+        $exame->cliente_id = $cliente->id;
 
         $this->registerPaciente($lote);
 

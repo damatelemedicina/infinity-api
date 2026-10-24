@@ -2,12 +2,10 @@
 
 namespace App\Services\Dicom;
 
-use App\Models\Cliente;
 use App\Models\DicomEquipamentoVisto;
 use App\Models\DicomPerfil;
 use App\Models\DicomTraducao;
 use App\Utils\DicomFields;
-use App\Utils\OrthancInstitutionName;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -86,12 +84,13 @@ class DicomProfileResolver
     }
 
     /**
-     * Valor especial de empresa_tag: em vez de uma tag, usa o nome do Cliente
-     * cadastrado cujo institution_name_id bate com o InstitutionName do DICOM
-     * (o mesmo hash que o sistema já usa pra descobrir o Cliente/tenant).
+     * Valor especial de empresa_tag: em vez de uma tag, usa a empresa (cliente)
+     * LOGADA — só no envio pela tela. No Orthanc e no DAMA Desktop não há usuário
+     * logado e o cliente achado é a clínica, então a empresa fica em branco para
+     * ser informada na tela de laudo (ver ExameController::empresaDoGrupo).
      */
     public const ORIGEM_CLIENTE = '@CLIENTE';
-    public const ROTULO_ORIGEM_CLIENTE = 'Cliente cadastrado (via InstitutionNameId)';
+    public const ROTULO_ORIGEM_CLIENTE = 'Empresa logada (só no envio pela tela)';
 
     /** Tags aceitas como origem de médico/empresa. */
     public const TAGS_TEXTO = [
@@ -204,6 +203,7 @@ class DicomProfileResolver
             'subtipo' => $tipo,
             'medico'  => $this->textoDaTag($perfil->medico_tag, $dicom),
             'empresa' => $this->textoDaTag($perfil->empresa_tag, $dicom),
+            'empresa_do_cliente' => $perfil->empresa_tag === self::ORIGEM_CLIENTE,
             'series_uid' => trim((string) $dicom->value(0x0020, 0x000E)),
             'parte_corpo_examinada' => null, // preenchido pelo ExameController (normalização única)
         ];
@@ -282,26 +282,6 @@ class DicomProfileResolver
         }
     }
 
-    /**
-     * Nome do Cliente achado pelo mesmo hash do fluxo normal: hex do
-     * InstitutionName cru sem o último byte == clientes.institution_name_id.
-     */
-    private function nomeDoCliente($dicom): ?string
-    {
-        $id = OrthancInstitutionName::computeIdFromRawBytes((string) $dicom->value(0x0008, 0x0080));
-        if (!$id) {
-            return null;
-        }
-
-        try {
-            $nome = Cliente::where('institution_name_id', $id)->value('nome');
-        } catch (Throwable $e) {
-            return null;
-        }
-
-        return $nome ? (DicomFields::toAsciiUpper($nome) ?: null) : null;
-    }
-
     private function traduzir(string $tipo): string
     {
         $mapa = self::traducoes();
@@ -311,9 +291,8 @@ class DicomProfileResolver
 
     private function textoDaTag(?string $tag, $dicom): ?string
     {
-        if ($tag === self::ORIGEM_CLIENTE) {
-            return $this->nomeDoCliente($dicom);
-        }
+        // ORIGEM_CLIENTE não vem de tag: o nome do cliente é resolvido depois, em
+        // ExameController::empresaDoGrupo(), já com o cliente certo do envio.
         if (empty($tag) || !isset(self::TAGS[$tag])) {
             return null;
         }
