@@ -80,6 +80,7 @@ class ExameSOCController extends Controller
                 return $carry;
             }, []);
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
     }
@@ -121,6 +122,7 @@ class ExameSOCController extends Controller
                 return $carry;
             });
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
     }
@@ -185,6 +187,7 @@ class ExameSOCController extends Controller
                 return $carry;
             });
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
     }
@@ -294,6 +297,7 @@ class ExameSOCController extends Controller
 
             return $exame;
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
     }
@@ -336,6 +340,7 @@ class ExameSOCController extends Controller
 
             return $exame;
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
     }
@@ -427,6 +432,7 @@ class ExameSOCController extends Controller
 
             return;
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             return;
         }
     }
@@ -523,6 +529,7 @@ class ExameSOCController extends Controller
 
             $exame->save();
         } catch (\Throwable $th) {
+            \Log::error('[SOC] ' . $th->getMessage(), ['exception' => $th]);
             throw new \App\Exceptions\LaudoException($th->getMessage());
         }
 
