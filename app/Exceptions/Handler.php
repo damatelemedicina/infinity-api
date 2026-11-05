@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -76,6 +77,35 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
+        // Log geral com contexto da requisição (storage/logs).
+        // Exceções de negócio (App\Exceptions\*) entram como warning; o restante como error.
+        $this->reportable(function (Throwable $e) {
+            $contexto = [];
+            try {
+                if (!app()->runningInConsole()) {
+                    $req = request();
+                    $contexto = [
+                        'metodo'  => $req->method(),
+                        'url'     => $req->fullUrl(),
+                        'usuario' => optional($req->user())->getKey(),
+                        'ip'      => $req->ip(),
+                    ];
+                }
+            } catch (Throwable $ignorado) {
+                // contexto é opcional
+            }
+
+            $negocio = str_starts_with(get_class($e), __NAMESPACE__ . '\\');
+            $contexto['exception'] = $e;
+
+            Log::log($negocio ? 'warning' : 'error', $e->getMessage(), $contexto);
+
+        })->stop(); // evita o log duplicado do handler padrão
+
+        $this->renderable(function (ArquivoInvalidoException $e, $request) {
+            return response(['erro' => $e->getMessage()], Self::$BAD_REQUEST);
+        });
+
         $this->renderable(function (BloqueioException $e, $request) {
             return response([ 'erro' => $e->getMessage()], Self::$FORBIDDEN);
         });

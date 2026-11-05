@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 
+use App\Exceptions\ArquivoInvalidoException;
 use App\Exceptions\FichaNaoEncontradaException;
 use App\Exceptions\EmpresaNaoEncontradaException;
 use App\Exceptions\ChaveDeTransmissaoNaoEncontradaException;
@@ -218,6 +219,7 @@ class ExameController extends Controller
             $domain = env('DOMAIN') ? env('DOMAIN') : \URL::to('/');
             return $domain . '/retirada?id=' . $request->id . '&download=true';
         } catch (\Throwable $th) {
+            \Log::warning('[RETIRADA EXAME] ' . $th->getMessage(), ['id' => $request->id ?? null, 'exception' => $th]);
             abort(404);
         }
     }
@@ -388,23 +390,27 @@ class ExameController extends Controller
         $rawName = $rawName.'.'.$extension;
         $fullName = $path.$rawName;
 
-        if (!str_contains('zip', $extension)) {
+        if ($extension != 'zip') {
             $file = $this->storePath($fullName);
             $zip->addFile($file, $this->stripAccents($name));
             return [ $file ];
         }
 
         $zip2 = new \ZipArchive();
+        $files = array($this->storePath($fullName));
 
-        if ($zip2->open($this->storePath($fullName)) == TRUE) {
+        $abriu = $zip2->open($this->storePath($fullName));
+        if ($abriu !== true) {
+            throw new ArquivoInvalidoException("O arquivo '$name' está corrompido ou não é um zip válido (código $abriu).");
+        }
 
-            $files = array($this->storePath($fullName));
+        if ($abriu === true) {
 
             for ($i = 0; $i < $zip2->numFiles; $i++){
 
                 $originalName = $this->stripAccents(strtolower($zip2->getNameIndex($i)));
 
-                if (str_contains('zip', $originalName)) {
+                if (strtolower(pathinfo($originalName, PATHINFO_EXTENSION)) == 'zip') {
                     continue; // zip inside zip is not allowed
                 }
 
@@ -489,8 +495,55 @@ class ExameController extends Controller
     }
 
     private function doFormUpload(Request $request, $filesToUpload = null, $path = null) {
+        // Captura os dados dos arquivos antes do processamento (o upload é movido durante o processo)
+        $arquivos = $this->getInfoArquivosUpload($request, $filesToUpload);
+        try {
+            return $this->doFormUploadArquivos($request, $filesToUpload, $path);
+        } catch (ArquivoInvalidoException $e) {
+            $this->logErroUpload($e, $request, $arquivos);
+            throw $e;
+        } catch (\Throwable $e) {
+            $this->logErroUpload($e, $request, $arquivos);
+            throw new ArquivoInvalidoException('Não foi possível ler o(s) arquivo(s) enviado(s): ' . $e->getMessage());
+        }
+    }
 
-        $path = $path == null ? Self::$PATH_EXAMES : $path;
+    private function getInfoArquivosUpload(Request $request, $filesToUpload = null) {
+        $arquivos = [];
+        try {
+            $lista = $filesToUpload == null ? $request->file('files') : $filesToUpload;
+            foreach ((array) $lista as $arquivo) {
+                if (!($arquivo instanceof \Illuminate\Http\UploadedFile)) continue;
+                $valido = $arquivo->isValid();
+                $arquivos[] = [
+                    'nome' => $arquivo->getClientOriginalName(),
+                    'tipo' => strtolower($arquivo->getClientOriginalExtension()),
+                ];
+            }
+        } catch (\Throwable $t) {
+            $arquivos[] = ['nome' => '(falha ao ler info: ' . $t->getMessage() . ')', 'tipo' => '?'];
+        }
+        return $arquivos;
+    }
+
+    private function logErroUpload(\Throwable $e, Request $request, array $arquivos = []) {
+        try {
+            $nomes = array_map(function ($a) { return $a['nome'] . ' (' . $a['tipo'] . ')'; }, $arquivos);
+            $exame = $request->id ?: ($request->exames ?: 'novo');
+            \Log::error(
+                '[UPLOAD EXAME] arquivo: ' . (implode(', ', $nomes) ?: 'nenhum') .
+                ' | exame: ' . $exame .
+                ' | erro: ' . $e->getMessage() .
+                ' | origem: ' . basename($e->getFile()) . ':' . $e->getLine()
+            );
+        } catch (\Throwable $logErro) {
+            \Log::error('[UPLOAD EXAME] ' . $e->getMessage() . ' (falha ao montar detalhes: ' . $logErro->getMessage() . ')');
+        }
+    }
+
+    private function doFormUploadArquivos(Request $request, $filesToUpload = null, $path = null) {
+
+        $path =$path == null ? Self::$PATH_EXAMES : $path;
 
         $result = array(
             'arquivo_exame' => null,
@@ -504,6 +557,12 @@ class ExameController extends Controller
             return $result;
         }
 
+        foreach ($filesToUpload as $arquivo) {
+            if (!$arquivo->isValid()) {
+                throw new ArquivoInvalidoException("O arquivo '" . $arquivo->getClientOriginalName() . "' não foi enviado corretamente: " . $arquivo->getErrorMessage());
+            }
+        }
+
         if (count($filesToUpload) == 1) {
             return $this->doUploadSingleFile($filesToUpload[0]);
         }
@@ -513,11 +572,15 @@ class ExameController extends Controller
         $zipRawName = \Str::random(40);
         $zipName = $path . $zipRawName . '.zip';
 
+        $fullNames = array();
         $zip = new \ZipArchive();
-        if ($zip->open($this->storePath($zipName), \ZipArchive::CREATE) === true) {
+        $abriu = $zip->open($this->storePath($zipName), \ZipArchive::CREATE);
+        if ($abriu !== true) {
+            throw new ArquivoInvalidoException("Não foi possível criar o arquivo zip dos exames (código $abriu).");
+        }
+        if ($abriu === true) {
 
             $imagemIndex = 0;
-            $fullNames = array();
             $files = array();
             foreach ($filesToUpload as $file) {
 
@@ -602,7 +665,11 @@ class ExameController extends Controller
         if ($extension != 'zip') return null;
         $zip = new \ZipArchive();
         $haImagem = false;
-        if ($zip->open($this->storePath($path) . $rawName . '.zip') === TRUE) {
+        $abriu = $zip->open($this->storePath($path) . $rawName . '.zip');
+        if ($abriu !== true) {
+            throw new ArquivoInvalidoException("O arquivo zip enviado está corrompido ou não é um zip válido (código $abriu).");
+        }
+        if ($abriu === true) {
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $name = $zip->getNameIndex($i);
                 $isDCM = $this->isDCMFile($name);
@@ -626,6 +693,7 @@ class ExameController extends Controller
                 $zip->renameName($newName, $name);
                 $index++;
             }
+            $zip->close();
         }
         return $haImagem ? ($path_images . $rawName . '{{' . $index  . '}}.' . $ext) : null;
     }
@@ -1786,6 +1854,7 @@ class ExameController extends Controller
                 try {
                     $exame->soc_resultado_enviado = \App\Http\Controllers\ExameSOCController::fnUpdateLaudoNoSOC($empresa, $cliente, $exame);
                 } catch (\Throwable $th) {
+                    \Log::error('[SOC] ' . $th->getMessage(), ['exame' => $exame->id ?? null, 'exception' => $th]);
                     $erroSOC[] = $th->getMessage();
                 }
 
@@ -1794,6 +1863,7 @@ class ExameController extends Controller
                     $exame->soc_nome_arquivo = \App\Http\Controllers\ExameSOCController::fnUploadLaudoNoSOCGED($empresa, $cliente, $exame);
 
                 } catch (\Throwable $th) {
+                    \Log::error('[SOC] ' . $th->getMessage(), ['exame' => $exame->id ?? null, 'exception' => $th]);
                     $erroSOC[] = $th->getMessage();
                 }
             }
@@ -1831,7 +1901,7 @@ class ExameController extends Controller
             return $this->geraLaudo($view, $data, $medico);
         }
         $this->makeDir($this->storePath(Self::$PATH_LAUDOS));
-        $arquivo_exame = $upload['arquivo_pdf'];
+        $arquivo_exame = $upload['arquivo_pdf'] ?? null;
         if (!$arquivo_exame) throw new InclusaoDeLaudoException("Arquivo PDF é necessário!");
         $arquivo_laudo = str_replace("/exames/", "/laudos/", $arquivo_exame);
         copy($this->storePath($arquivo_exame), $this->storePath($arquivo_laudo));
