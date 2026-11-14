@@ -25,9 +25,9 @@ RUN apt-get install -y libmcrypt-dev \
 RUN apt-get install -y default-jre
 
 #composer
-# https://composer.github.io/installer.sig
+# hash vem da assinatura oficial (o instalador muda e um hash fixo quebra o build)
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
-    && php -r "if (hash_file('sha384', 'composer-setup.php') === '55ce33d7678c5a611085589f1f3ddf8b3c52d662cd01d4ba75c0ee0459970c2200a51f492d557530c71c15d8dba01eae') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" \
+    && php -r "\$expected = trim(file_get_contents('https://composer.github.io/installer.sig')); if (\$expected !== '' && hash_file('sha384', 'composer-setup.php') === \$expected) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); } echo PHP_EOL;" \
     && php composer-setup.php --install-dir=/usr/local/bin --filename=composer \
     && php -r "unlink('composer-setup.php');"
 

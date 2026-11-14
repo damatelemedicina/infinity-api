@@ -12,6 +12,8 @@
             <th>EXAME</th>
             <th>MEDICO</th>
             <th>PACIENTE</th>
+            <th>RG</th>
+            <th>CPF</th>
             <th>DATA DO EXAME</th>
             <th>DATA DO LAUDO</th>
             <th>TELEMEDICINA</th>
@@ -25,6 +27,8 @@
                 <td width="25">{{ $laudo->tipo_exame }}</td>
                 <td width="35">{{ $laudo->medico_nome }}</td>
                 <td width="35">{{ $laudo->paciente }}</td>
+                <td width="20">{{ $laudo->rg ?? '--' }}</td>
+                <td width="20">{{ $laudo->cpf ?? '--' }}</td>
                 <td width="20">{{ $laudo->exame_data }}</td>
                 <td width="20">{{ $laudo->laudo_data }}</td>
                 <td width="20">{{ $laudo->empresa }}</td>
@@ -32,6 +36,8 @@
             </tr>
         @endforeach
             <tr>
+                <td></td>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td></td>

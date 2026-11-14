@@ -928,12 +928,24 @@ BEGIN
     SELECT
         ex.id AS exame_id,
         ex.paciente AS paciente,
+        ex.rg AS rg,
+        ex.cpf AS cpf,
         ex.created_at AS exame_data,
         ex.laudo_date AS laudo_data,
         em.nome as empresa,
         cl.nome AS cliente_nome,
         te.nome AS tipo_exame,
         me.nome AS medico_nome,
+        if (ex.abonado_medico = 1 OR ex.ativo = 0,
+             0,
+            IFNULL((SELECT pm.preco FROM preco_medicos pm WHERE
+                pm.empresa_id = me.empresa_id AND
+                pm.medico_id = ex.medico_id AND
+                pm.tipo_exame_id = ex.exame_id AND
+                ex.created_at >= pm.vigencia_de AND ex.created_at <= pm.vigencia_ate
+                limit 1
+            ), 0)
+        ) AS preco_laudo,
         concat("R$ ", format(if (
             ex.abonado_medico = 1 OR ex.ativo = 0,
             0,
@@ -944,7 +956,7 @@ BEGIN
                 ex.created_at >= pm.vigencia_de AND ex.created_at <= pm.vigencia_ate
                 limit 1
             ), 0)
-        ), 2, 'pt_BR')) AS preco_laudo
+        ), 2, 'pt_BR')) AS preco_laudo_formatado
     FROM exames ex
     INNER JOIN empresas em
     	ON em.id = ex.empresa_id
@@ -968,11 +980,24 @@ BEGIN
         exame_data,
         laudo_data,
         upper(paciente) as paciente,
+        rg,
+        cpf,
         upper(tipo_exame) as tipo_exame,
         upper(empresa) as empresa,
         upper(cliente) as cliente,
         upper(medico) as medico,
         upper(contratante) as contratante,
+        if (abonado = 1 OR ativo = 0, 0,
+            if(
+                num <= limite1,
+                if (
+                    cobranca1 = 'PACOTE',
+                    preco1 / limite1,
+                    preco1
+                ),
+                preco2
+            )
+        ) as preco,
         concat("R$ ", format(if(
             abonado = 1 OR ativo = 0,
             0,
@@ -985,7 +1010,7 @@ BEGIN
                 ),
                 preco2
             )
-        ), 2, 'pt_BR')) as preco
+        ), 2, 'pt_BR')) as preco_formatado
     FROM (
         SELECT
             (@cnt := @cnt + 1) AS num,
@@ -994,6 +1019,8 @@ BEGIN
             em.nome as empresa,
             cl.nome as cliente,
             ex.paciente as paciente,
+            ex.rg as rg,
+            ex.cpf as cpf,
             ex.created_at as exame_data,
             ex.laudo_date as laudo_data,
             ex.abonado as abonado,
