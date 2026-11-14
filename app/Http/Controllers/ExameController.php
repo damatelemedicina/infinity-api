@@ -793,7 +793,7 @@ class ExameController extends Controller
         $exame->contratante = strtoupper($exame->contratante);
         $exame->nascimento = $this->toDateTime(isset($request->nascimento) ? $request->nascimento : null);
         $exame->exame_date = $this->toDateTime(isset($request->exame_date) ? $request->exame_date : null);
-        $exame->rg = preg_replace( '/[^0-9]/', '', $request->rg);
+        $exame->rg = strtoupper(preg_replace( '/[^0-9A-Za-z]/', '', $request->rg));
         $exame->cpf = preg_replace( '/[^0-9]/', '', $request->cpf);
         $exame->fumante = filter_var($request->fumante, FILTER_VALIDATE_BOOLEAN) ? 'S' : 'N';
         $exame->arquivo_exame = $upload['arquivo_exame'] ? $upload['arquivo_exame'] : $exame->arquivo_exame;
