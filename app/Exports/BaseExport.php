@@ -16,11 +16,13 @@ class BaseExport extends DefaultValueBinder implements WithCustomValueBinder, Sh
 
     protected $lastColumn = '';
     protected $lastRow = null;
+    protected $cabecalhos = [];
 
     public function bindValue(Cell $cell, $value)
     {
         if ($cell->getRow() == 1) {
             $this->lastColumn = $cell->getColumn();
+            $this->cabecalhos[$cell->getColumn()] = $value;
         } else if ($cell->getColumn() == $this->lastColumn) {
             $cell->getWorksheet()->getRowDimension($cell->getRow())->setRowHeight(18);
         }
@@ -34,6 +36,11 @@ class BaseExport extends DefaultValueBinder implements WithCustomValueBinder, Sh
         }
 
         if ($cell->getColumn() == 'A') return parent::bindValue($cell, $value);
+        if ($cell->getRow() > 1 && $this->isColunaTexto($cell)) {
+            $cell->setValueExplicit((string) $value, DataType::TYPE_STRING);
+            $cell->getStyle($cell->getCoordinate())->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_TEXT);
+            return true;
+        }
         if (is_numeric($value)) {
             $pos = $cell->getColumn() . ':' . $cell->getRow();
             $cell->getStyle($pos)->getNumberFormat()->setFormatCode('R$ #,##0.00_-');
@@ -47,6 +54,12 @@ class BaseExport extends DefaultValueBinder implements WithCustomValueBinder, Sh
             return true;
         }
         return parent::bindValue($cell, $value);
+    }
+
+    // colunas de documento (RG/CPF) sao texto: nao podem virar numero nem receber formato de moeda
+    private function isColunaTexto(Cell $cell) {
+        $cabecalho = isset($this->cabecalhos[$cell->getColumn()]) ? $this->cabecalhos[$cell->getColumn()] : '';
+        return in_array(strtoupper(trim((string) $cabecalho)), ['RG', 'CPF'], true);
     }
 
     protected function total($sumario) {

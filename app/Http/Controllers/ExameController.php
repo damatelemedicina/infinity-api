@@ -507,7 +507,7 @@ class ExameController extends Controller
             throw new ArquivoInvalidoException('Não foi possível ler o(s) arquivo(s) enviado(s): ' . $e->getMessage());
         }
     }
-
+ 
     private function getInfoArquivosUpload(Request $request, $filesToUpload = null) {
         $arquivos = [];
         try {
