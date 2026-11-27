@@ -36,15 +36,7 @@ class PainelViewModel extends BaseViewModel
         }
 
         if (empty($medicoId) === false) {
-            $medicosExames = DB::table('medicos_exames')
-                ->select('medicos_exames.tipo_exame_id')
-                ->where('medicos_exames.medico_id', '=', $medicoId);
-
-            $tableExames->whereIn('exames.medico_id', $medicosExames)
-                ->where(function ($query) use ($medicoId) {
-                    $query->where('exames.medico_id', '=', $medicoId)
-                        ->orWhere('exames.medico_id', '=', 0);
-                });
+            $tableExames->where('exames.medico_id', '=', $medicoId);
         }
 
         if (empty($matrizId) === false) {
